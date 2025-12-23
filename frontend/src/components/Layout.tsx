@@ -1,14 +1,30 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { apiService, UserInfo } from "../services/api";
 
 interface LayoutProps {
   children: ReactNode;
 }
 
+const roleLabels: Record<string, string> = {
+  to_truong: "Tổ trưởng",
+  to_pho: "Tổ phó",
+  can_bo: "Cán bộ",
+  nguoi_dan: "Người dân",
+};
+
+const taskLabels: Record<string, string> = {
+  hokhau_nhankhau: "Hộ khẩu/Nhân khẩu",
+  tamtru_tamvang: "Tạm trú/Tạm vắng",
+  thongke: "Thống kê",
+  kiennghi: "Kiến nghị",
+};
+
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
   const menuItems = [
     { path: "/dashboard", label: "Dashboard", icon: "📊" },
@@ -21,52 +37,88 @@ export default function Layout({ children }: LayoutProps) {
     { path: "/bao-cao", label: "Báo cáo", icon: "📄" }
   ];
 
+  useEffect(() => {
+    const loadUserInfo = async () => {
+      try {
+        const response = await apiService.getMe();
+        if (response.success) {
+          setUserInfo(response.data);
+          localStorage.setItem("userInfo", JSON.stringify(response.data));
+        }
+      } catch (err) {
+        console.error("Failed to load user info:", err);
+        // Nếu token invalid, logout
+        apiService.logout();
+        navigate("/");
+      }
+    };
+
+    const storedUserInfo = localStorage.getItem("userInfo");
+    if (storedUserInfo) {
+      try {
+        setUserInfo(JSON.parse(storedUserInfo));
+      } catch (e) {
+        // Ignore parse error
+      }
+    }
+
+    loadUserInfo();
+  }, [navigate]);
+
   const handleLogout = () => {
-    localStorage.removeItem("isAuthenticated");
-    localStorage.removeItem("userRole");
+    apiService.logout();
     navigate("/");
   };
 
-  const userRole = localStorage.getItem("userRole");
-  const userName = userRole === "to_truong" ? "Tổ trưởng" : "Người dân";
+  const userName = userInfo
+    ? `${roleLabels[userInfo.role] || userInfo.role}${
+        userInfo.task ? ` - ${taskLabels[userInfo.task] || userInfo.task}` : ""
+      }`
+    : "Đang tải...";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-950">
+    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-gray-50 via-white to-gray-50">
       {/* Sidebar */}
       <aside
         className={`${
           isSidebarOpen ? "w-64" : "w-20"
-        } border-r border-slate-800 bg-slate-900/50 transition-all duration-300 flex flex-col`}
+        } border-r border-gray-200/80 bg-white/95 backdrop-blur-sm shadow-lg transition-all duration-300 flex flex-col`}
       >
         {/* Logo/Header */}
-        <div className="flex h-16 items-center justify-between border-b border-slate-800 px-4">
+        <div className="flex h-16 items-center justify-between border-b border-gray-200/60 px-4 bg-gradient-to-r from-blue-50/50 to-cyan-50/30">
           {isSidebarOpen && (
-            <h1 className="text-lg font-bold text-white">Quản lý Dân cư</h1>
+            <div>
+              <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                Quản lý Dân cư
+              </h1>
+              <p className="text-xs text-gray-500 mt-0.5">TDP7 La Khê</p>
+            </div>
           )}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+            aria-label="Toggle sidebar"
           >
             {isSidebarOpen ? "◀" : "▶"}
           </button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto p-4">
-          <ul className="space-y-2">
+        <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+          <ul className="space-y-1">
             {menuItems.map((item) => {
               const isActive = location.pathname === item.path;
               return (
                 <li key={item.path}>
                   <Link
                     to={item.path}
-                    className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${
+                    className={`flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 ${
                       isActive
-                        ? "bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-400 border border-cyan-500/30"
-                        : "text-slate-300 hover:bg-slate-800/50 hover:text-white"
+                        ? "bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-md shadow-blue-500/25 scale-[1.02]"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 hover:scale-[1.01]"
                     }`}
                   >
-                    <span className="text-xl">{item.icon}</span>
+                    <span className="text-lg">{item.icon}</span>
                     {isSidebarOpen && <span>{item.label}</span>}
                   </Link>
                 </li>
@@ -76,28 +128,32 @@ export default function Layout({ children }: LayoutProps) {
         </nav>
 
         {/* User Info & Logout */}
-        <div className="border-t border-slate-800 p-4">
+        <div className="border-t border-gray-200/60 p-4 bg-gray-50/50">
           {isSidebarOpen && (
-            <div className="mb-3 rounded-lg bg-slate-800/50 p-3">
-              <p className="text-xs text-slate-400">Đăng nhập với tư cách</p>
-              <p className="text-sm font-semibold text-white">{userName}</p>
+            <div className="mb-3 rounded-lg bg-white border border-gray-200 p-3 shadow-sm">
+              <p className="text-xs text-gray-500 mb-1">Đăng nhập với tư cách</p>
+              <p className="text-sm font-semibold text-gray-900 leading-tight">{userName}</p>
             </div>
           )}
           <button
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-xl bg-rose-500/20 px-4 py-3 text-sm font-medium text-rose-400 transition-all hover:bg-rose-500/30"
+            className="flex w-full items-center gap-3 rounded-lg bg-gradient-to-r from-red-50 to-rose-50 border border-red-200/60 px-4 py-2.5 text-sm font-medium text-red-600 transition-all hover:from-red-100 hover:to-rose-100 hover:shadow-sm"
           >
-            <span>🚪</span>
+            <span className="text-base">🚪</span>
             {isSidebarOpen && <span>Đăng xuất</span>}
           </button>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto bg-slate-950 p-6">
-        {children}
+      <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50/50 via-white to-gray-50/50 p-6">
+        <div className="max-w-7xl mx-auto">
+          {children}
+        </div>
       </main>
     </div>
   );
 }
+
+
 

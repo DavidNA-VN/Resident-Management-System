@@ -1,8 +1,10 @@
-﻿import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import HoKhau from "./pages/HoKhau";
+import NhanKhau from "./pages/NhanKhau";
 
 function App() {
   return (
@@ -24,10 +26,7 @@ function App() {
           element={
             <ProtectedRoute>
               <Layout>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8 backdrop-blur-sm">
-                  <h1 className="text-2xl font-bold text-white">Quản lý Hộ khẩu</h1>
-                  <p className="mt-2 text-slate-400">Trang này đang được phát triển...</p>
-                </div>
+                <HoKhau />
               </Layout>
             </ProtectedRoute>
           }
@@ -37,10 +36,7 @@ function App() {
           element={
             <ProtectedRoute>
               <Layout>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8 backdrop-blur-sm">
-                  <h1 className="text-2xl font-bold text-white">Quản lý Nhân khẩu</h1>
-                  <p className="mt-2 text-slate-400">Trang này đang được phát triển...</p>
-            </div>
+                <NhanKhau />
               </Layout>
             </ProtectedRoute>
           }
@@ -50,10 +46,12 @@ function App() {
           element={
             <ProtectedRoute>
               <Layout>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8 backdrop-blur-sm">
-                  <h1 className="text-2xl font-bold text-white">Biến động Nhân khẩu</h1>
-                  <p className="mt-2 text-slate-400">Trang này đang được phát triển...</p>
-              </div>
+                <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
+                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                    Biến động Nhân khẩu
+                  </h1>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                </div>
               </Layout>
             </ProtectedRoute>
           }
@@ -63,10 +61,12 @@ function App() {
           element={
             <ProtectedRoute>
               <Layout>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8 backdrop-blur-sm">
-                  <h1 className="text-2xl font-bold text-white">Tạm trú / Tạm vắng</h1>
-                  <p className="mt-2 text-slate-400">Trang này đang được phát triển...</p>
-            </div>
+                <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
+                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                    Tạm trú / Tạm vắng
+                  </h1>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                </div>
               </Layout>
             </ProtectedRoute>
           }
@@ -76,10 +76,12 @@ function App() {
           element={
             <ProtectedRoute>
               <Layout>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8 backdrop-blur-sm">
-                  <h1 className="text-2xl font-bold text-white">Phản ánh Kiến nghị</h1>
-                  <p className="mt-2 text-slate-400">Trang này đang được phát triển...</p>
-            </div>
+                <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
+                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                    Phản ánh Kiến nghị
+                  </h1>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                </div>
               </Layout>
             </ProtectedRoute>
           }
@@ -89,10 +91,12 @@ function App() {
           element={
             <ProtectedRoute>
               <Layout>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8 backdrop-blur-sm">
-                  <h1 className="text-2xl font-bold text-white">Thống kê</h1>
-                  <p className="mt-2 text-slate-400">Trang này đang được phát triển...</p>
-              </div>
+                <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
+                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                    Thống kê
+                  </h1>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                </div>
               </Layout>
             </ProtectedRoute>
           }
@@ -102,10 +106,12 @@ function App() {
           element={
             <ProtectedRoute>
               <Layout>
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8 backdrop-blur-sm">
-                  <h1 className="text-2xl font-bold text-white">Báo cáo</h1>
-                  <p className="mt-2 text-slate-400">Trang này đang được phát triển...</p>
-    </div>
+                <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
+                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+                    Báo cáo
+                  </h1>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                </div>
               </Layout>
             </ProtectedRoute>
           }

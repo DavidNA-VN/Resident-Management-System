@@ -598,3 +598,79 @@ GROUP BY
     pa.id, pa."tieuDe", pa."noiDung", pa.loai, pa."trangThai",
     pa."ngayTao", pa."nguoiXuLy", pa."nguoiDuyet";
 
+
+-- ============================================
+-- 14) TASK-BASED PERMISSIONS (TDP7 La Khê)
+-- - Thêm cột users.task
+-- - Ràng buộc chỉ cho 4 task code hợp lệ
+-- - Seed một số user mẫu cho demo
+-- ============================================
+
+-- 14.1) Thêm cột task vào bảng users (nullable)
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS task VARCHAR(30);
+
+-- 14.2) Ràng buộc CHECK cho cột task
+ALTER TABLE users
+DROP CONSTRAINT IF EXISTS chk_users_task;
+
+ALTER TABLE users
+ADD CONSTRAINT chk_users_task
+CHECK (
+  task IS NULL
+  OR task IN ('hokhau_nhankhau', 'tamtru_tamvang', 'thongke', 'kiennghi')
+);
+
+-- 14.3) Seed / update user mẫu (idempotent theo username)
+-- Lưu ý: password đang ở dạng plain text chỉ để demo
+
+-- Tổ trưởng: full quyền, task = NULL
+INSERT INTO users (username, password, role, "fullName", cccd, phone, email, "isActive")
+VALUES ('totruong01', '123456', 'to_truong', 'Tổ trưởng TDP7 La Khê', '111111111111', '0900000001', 'totruong01@example.com', TRUE)
+ON CONFLICT (username) DO UPDATE
+SET role = EXCLUDED.role,
+    password = EXCLUDED.password,
+    "fullName" = EXCLUDED."fullName",
+    task = NULL,
+    "isActive" = TRUE;
+
+-- Tổ phó: full quyền, task = NULL
+INSERT INTO users (username, password, role, "fullName", cccd, phone, email, "isActive")
+VALUES ('topho01', '123456', 'to_pho', 'Tổ phó TDP7 La Khê', '222222222222', '0900000002', 'topho01@example.com', TRUE)
+ON CONFLICT (username) DO UPDATE
+SET role = EXCLUDED.role,
+    password = EXCLUDED.password,
+    "fullName" = EXCLUDED."fullName",
+    task = NULL,
+    "isActive" = TRUE;
+
+-- Cán bộ 1: phụ trách hộ khẩu/nhân khẩu
+INSERT INTO users (username, password, role, "fullName", cccd, phone, email, task, "isActive")
+VALUES ('canbo01', '123456', 'can_bo', 'Cán bộ HK/NK TDP7 La Khê', '333333333333', '0900000003', 'canbo01@example.com', 'hokhau_nhankhau', TRUE)
+ON CONFLICT (username) DO UPDATE
+SET role = EXCLUDED.role,
+    password = EXCLUDED.password,
+    "fullName" = EXCLUDED."fullName",
+    task = 'hokhau_nhankhau',
+    "isActive" = TRUE;
+
+-- Cán bộ 2: phụ trách kiến nghị (KHÔNG được làm hộ khẩu/nhân khẩu)
+INSERT INTO users (username, password, role, "fullName", cccd, phone, email, task, "isActive")
+VALUES ('canbo02', '123456', 'can_bo', 'Cán bộ kiến nghị TDP7 La Khê', '444444444444', '0900000004', 'canbo02@example.com', 'kiennghi', TRUE)
+ON CONFLICT (username) DO UPDATE
+SET role = EXCLUDED.role,
+    password = EXCLUDED.password,
+    "fullName" = EXCLUDED."fullName",
+    task = 'kiennghi',
+    "isActive" = TRUE;
+
+-- Người dân: không được tạo hộ khẩu / nhân khẩu
+INSERT INTO users (username, password, role, "fullName", cccd, phone, email, "isActive")
+VALUES ('nguoidan01', '123456', 'nguoi_dan', 'Người dân TDP7 La Khê', '555555555555', '0900000005', 'nguoidan01@example.com', TRUE)
+ON CONFLICT (username) DO UPDATE
+SET role = EXCLUDED.role,
+    password = EXCLUDED.password,
+    "fullName" = EXCLUDED."fullName",
+    task = NULL,
+    "isActive" = TRUE;
+
