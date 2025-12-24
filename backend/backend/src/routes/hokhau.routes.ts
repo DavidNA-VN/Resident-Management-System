@@ -88,7 +88,10 @@ router.post(
       if (!soHoKhau || !diaChi) {
         return res.status(400).json({
           success: false,
-          error: { code: "VALIDATION_ERROR", message: "Missing soHoKhau or diaChi" },
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Missing soHoKhau or diaChi",
+          },
         });
       }
 
@@ -121,6 +124,106 @@ router.post(
 );
 
 /**
+ * PATCH /ho-khau/:id
+ * Cập nhật thông tin hộ khẩu
+ */
+router.patch(
+  "/ho-khau/:id",
+  requireAuth,
+  requireTask("hokhau_nhankhau"),
+  async (req, res, next) => {
+    try {
+      const hoKhauId = Number(req.params.id);
+      if (!Number.isInteger(hoKhauId) || hoKhauId <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: { code: "VALIDATION_ERROR", message: "Invalid hoKhauId" },
+        });
+      }
+
+      const current = await query(`SELECT * FROM ho_khau WHERE id = $1`, [
+        hoKhauId,
+      ]);
+      if (current.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Hộ khẩu không tồn tại" },
+        });
+      }
+
+      const {
+        soHoKhau,
+        diaChi,
+        tinhThanh,
+        quanHuyen,
+        phuongXa,
+        duongPho,
+        soNha,
+        diaChiDayDu,
+        ngayCap,
+        ghiChu,
+      } = req.body;
+
+      const merged = {
+        soHoKhau: soHoKhau ?? current.rows[0].soHoKhau,
+        diaChi: diaChi ?? current.rows[0].diaChi,
+        tinhThanh: tinhThanh ?? current.rows[0].tinhThanh,
+        quanHuyen: quanHuyen ?? current.rows[0].quanHuyen,
+        phuongXa: phuongXa ?? current.rows[0].phuongXa,
+        duongPho: duongPho ?? current.rows[0].duongPho,
+        soNha: soNha ?? current.rows[0].soNha,
+        diaChiDayDu: diaChiDayDu ?? current.rows[0].diaChiDayDu,
+        ngayCap: ngayCap ?? current.rows[0].ngayCap,
+        ghiChu: ghiChu ?? current.rows[0].ghiChu,
+      };
+
+      if (!merged.soHoKhau || !merged.diaChi) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Missing soHoKhau or diaChi",
+          },
+        });
+      }
+
+      const r = await query(
+        `UPDATE ho_khau
+         SET "soHoKhau" = $1,
+             "diaChi" = $2,
+             "tinhThanh" = $3,
+             "quanHuyen" = $4,
+             "phuongXa" = $5,
+             "duongPho" = $6,
+             "soNha" = $7,
+             "diaChiDayDu" = $8,
+             "ngayCap" = $9,
+             "ghiChu" = $10
+         WHERE id = $11
+         RETURNING *`,
+        [
+          merged.soHoKhau,
+          merged.diaChi,
+          merged.tinhThanh,
+          merged.quanHuyen,
+          merged.phuongXa,
+          merged.duongPho,
+          merged.soNha,
+          merged.diaChiDayDu,
+          merged.ngayCap,
+          merged.ghiChu,
+          hoKhauId,
+        ]
+      );
+
+      return res.json({ success: true, data: r.rows[0] });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * PATCH /ho-khau/:id/activate
  * Set chuHoId + activate trong 1 query
  */
@@ -136,7 +239,10 @@ router.patch(
       if (!hoKhauId || !chuHoId) {
         return res.status(400).json({
           success: false,
-          error: { code: "VALIDATION_ERROR", message: "Missing hoKhauId or chuHoId" },
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Missing hoKhauId or chuHoId",
+          },
         });
       }
 
@@ -148,7 +254,10 @@ router.patch(
       if (check.rowCount === 0) {
         return res.status(400).json({
           success: false,
-          error: { code: "INVALID_CHU_HO", message: "chuHoId không thuộc hộ khẩu này" },
+          error: {
+            code: "INVALID_CHU_HO",
+            message: "chuHoId không thuộc hộ khẩu này",
+          },
         });
       }
 

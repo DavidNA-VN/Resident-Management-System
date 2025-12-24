@@ -156,6 +156,27 @@ class ApiService {
     });
   }
 
+  async updateHoKhau(
+    id: number,
+    data: {
+      soHoKhau?: string;
+      diaChi?: string;
+      tinhThanh?: string;
+      quanHuyen?: string;
+      phuongXa?: string;
+      duongPho?: string;
+      soNha?: string;
+      diaChiDayDu?: string;
+      ngayCap?: string;
+      ghiChu?: string;
+    }
+  ) {
+    return this.request<{ success: boolean; data: any }>(`/ho-khau/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
   async activateHoKhau(hoKhauId: number, chuHoId: number) {
     return this.request<{ success: boolean; data: any }>(
       `/ho-khau/${hoKhauId}/activate`,
@@ -192,6 +213,30 @@ class ApiService {
   }) {
     return this.request<{ success: boolean; data: any }>("/nhan-khau", {
       method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateNhanKhau(
+    id: number,
+    data: {
+      hoTen?: string;
+      cccd?: string;
+      ngaySinh?: string;
+      gioiTinh?: "nam" | "nu" | "khac";
+      quanHe?:
+        | "chu_ho"
+        | "vo_chong"
+        | "con"
+        | "cha_me"
+        | "anh_chi_em"
+        | "ong_ba"
+        | "chau"
+        | "khac";
+    }
+  ) {
+    return this.request<{ success: boolean; data: any }>(`/nhan-khau/${id}`, {
+      method: "PATCH",
       body: JSON.stringify(data),
     });
   }

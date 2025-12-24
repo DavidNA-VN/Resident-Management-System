@@ -63,6 +63,12 @@ class ApiService {
             body: JSON.stringify(data),
         });
     }
+    async updateHoKhau(id, data) {
+        return this.request(`/ho-khau/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify(data),
+        });
+    }
     async activateHoKhau(hoKhauId, chuHoId) {
         return this.request(`/ho-khau/${hoKhauId}/activate`, {
             method: "PATCH",
@@ -76,6 +82,12 @@ class ApiService {
     async createNhanKhau(data) {
         return this.request("/nhan-khau", {
             method: "POST",
+            body: JSON.stringify(data),
+        });
+    }
+    async updateNhanKhau(id, data) {
+        return this.request(`/nhan-khau/${id}`, {
+            method: "PATCH",
             body: JSON.stringify(data),
         });
     }
