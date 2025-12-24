@@ -26,15 +26,24 @@ export default function Layout({ children }: LayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
-  const menuItems = [
+  const staffMenuItems = [
     { path: "/dashboard", label: "Dashboard", icon: "📊" },
     { path: "/ho-khau", label: "Hộ khẩu", icon: "🏠" },
     { path: "/nhan-khau", label: "Nhân khẩu", icon: "👥" },
     { path: "/bien-dong", label: "Biến động", icon: "📝" },
     { path: "/tam-tru-vang", label: "Tạm trú / Tạm vắng", icon: "📍" },
+    { path: "/yeu-cau", label: "Yêu cầu", icon: "📨" },
     { path: "/phan-anh", label: "Phản ánh", icon: "💬" },
     { path: "/thong-ke", label: "Thống kê", icon: "📈" },
-    { path: "/bao-cao", label: "Báo cáo", icon: "📄" }
+    { path: "/bao-cao", label: "Báo cáo", icon: "📄" },
+  ];
+
+  const citizenMenuItems = [
+    { path: "/dashboard", label: "Dashboard", icon: "📊" },
+    { path: "/ho-khau", label: "Hộ khẩu", icon: "🏠" },
+    { path: "/nhan-khau", label: "Nhân khẩu", icon: "👥" },
+    { path: "/yeu-cau", label: "Yêu cầu", icon: "📨" },
+    { path: "/phan-anh", label: "Phản ánh", icon: "💬" },
   ];
 
   useEffect(() => {
@@ -75,6 +84,9 @@ export default function Layout({ children }: LayoutProps) {
         userInfo.task ? ` - ${taskLabels[userInfo.task] || userInfo.task}` : ""
       }`
     : "Đang tải...";
+
+  const menuItems =
+    userInfo?.role === "nguoi_dan" ? citizenMenuItems : staffMenuItems;
 
   return (
     <div className="flex h-screen overflow-hidden bg-gradient-to-br from-gray-50 via-white to-gray-50">
@@ -131,8 +143,12 @@ export default function Layout({ children }: LayoutProps) {
         <div className="border-t border-gray-200/60 p-4 bg-gray-50/50">
           {isSidebarOpen && (
             <div className="mb-3 rounded-lg bg-white border border-gray-200 p-3 shadow-sm">
-              <p className="text-xs text-gray-500 mb-1">Đăng nhập với tư cách</p>
-              <p className="text-sm font-semibold text-gray-900 leading-tight">{userName}</p>
+              <p className="text-xs text-gray-500 mb-1">
+                Đăng nhập với tư cách
+              </p>
+              <p className="text-sm font-semibold text-gray-900 leading-tight">
+                {userName}
+              </p>
             </div>
           )}
           <button
@@ -147,13 +163,8 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50/50 via-white to-gray-50/50 p-6">
-        <div className="max-w-7xl mx-auto">
-          {children}
-        </div>
+        <div className="max-w-7xl mx-auto">{children}</div>
       </main>
     </div>
   );
 }
-
-
-

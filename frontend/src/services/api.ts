@@ -71,9 +71,9 @@ class ApiService {
     options: RequestInit = {}
   ): Promise<T> {
     const token = this.getAuthToken();
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      ...options.headers,
+      ...(options.headers as Record<string, string> | undefined),
     };
 
     if (token) {
@@ -198,5 +198,3 @@ class ApiService {
 }
 
 export const apiService = new ApiService();
-
-

@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import HoKhau from "./pages/HoKhau";
 import NhanKhau from "./pages/NhanKhau";
+import YeuCau from "./pages/YeuCau";
 
 function App() {
   return (
@@ -42,6 +43,16 @@ function App() {
           }
         />
         <Route
+          path="/yeu-cau"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <YeuCau />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/bien-dong"
           element={
             <ProtectedRoute>
@@ -50,7 +61,9 @@ function App() {
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Biến động Nhân khẩu
                   </h1>
-                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                  <p className="mt-2 text-gray-600">
+                    Trang này đang được phát triển...
+                  </p>
                 </div>
               </Layout>
             </ProtectedRoute>
@@ -65,7 +78,9 @@ function App() {
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Tạm trú / Tạm vắng
                   </h1>
-                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                  <p className="mt-2 text-gray-600">
+                    Trang này đang được phát triển...
+                  </p>
                 </div>
               </Layout>
             </ProtectedRoute>
@@ -80,7 +95,9 @@ function App() {
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Phản ánh Kiến nghị
                   </h1>
-                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                  <p className="mt-2 text-gray-600">
+                    Trang này đang được phát triển...
+                  </p>
                 </div>
               </Layout>
             </ProtectedRoute>
@@ -95,7 +112,9 @@ function App() {
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Thống kê
                   </h1>
-                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                  <p className="mt-2 text-gray-600">
+                    Trang này đang được phát triển...
+                  </p>
                 </div>
               </Layout>
             </ProtectedRoute>
@@ -110,7 +129,9 @@ function App() {
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Báo cáo
                   </h1>
-                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
+                  <p className="mt-2 text-gray-600">
+                    Trang này đang được phát triển...
+                  </p>
                 </div>
               </Layout>
             </ProtectedRoute>

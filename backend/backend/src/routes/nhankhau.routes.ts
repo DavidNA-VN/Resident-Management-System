@@ -48,14 +48,7 @@ router.post(
   requireTask("hokhau_nhankhau"),
   async (req, res, next) => {
     try {
-      const {
-        hoKhauId,
-        hoTen,
-        cccd,
-        ngaySinh,
-        gioiTinh,
-        quanHe,
-      } = req.body;
+      const { hoKhauId, hoTen, cccd, ngaySinh, gioiTinh, quanHe } = req.body;
 
       if (!hoKhauId || !hoTen || !quanHe) {
         return res.status(400).json({
@@ -63,6 +56,17 @@ router.post(
           error: {
             code: "VALIDATION_ERROR",
             message: "Missing hoKhauId or hoTen or quanHe",
+          },
+        });
+      }
+
+      const hoKhauIdNumber = Number(hoKhauId);
+      if (!Number.isInteger(hoKhauIdNumber) || hoKhauIdNumber <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Invalid hoKhauId",
           },
         });
       }
@@ -84,6 +88,45 @@ router.post(
         });
       }
 
+      const hoKhauResult = await query<{ id: number; chuHoId: number | null }>(
+        `SELECT id, "chuHoId" FROM ho_khau WHERE id = $1`,
+        [hoKhauIdNumber]
+      );
+
+      if (hoKhauResult.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Hộ khẩu không tồn tại" },
+        });
+      }
+
+      if (quanHe === "chu_ho") {
+        if (hoKhauResult.rows[0].chuHoId) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: "HOUSEHOLD_HEAD_EXISTS",
+              message: "Hộ khẩu này đã có chủ hộ",
+            },
+          });
+        }
+
+        const existingChuHo = await query(
+          `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 AND "quanHe" = 'chu_ho' LIMIT 1`,
+          [hoKhauIdNumber]
+        );
+
+        if ((existingChuHo.rowCount ?? 0) > 0) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: "HOUSEHOLD_HEAD_EXISTS",
+              message: "Hộ khẩu này đã có chủ hộ",
+            },
+          });
+        }
+      }
+
       const r = await query(
         `INSERT INTO nhan_khau
          ("hoKhauId","hoTen","cccd","ngaySinh","gioiTinh","quanHe")
@@ -91,7 +134,7 @@ router.post(
          ($1,$2,$3,$4,$5,$6)
          RETURNING *`,
         [
-          hoKhauId,
+          hoKhauIdNumber,
           hoTen,
           cccd ?? null,
           ngaySinh ?? null,

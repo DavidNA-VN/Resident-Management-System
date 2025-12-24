@@ -118,7 +118,11 @@ export default function NhanKhau() {
         }
       }
     } catch (err: any) {
-      setError(err.error?.message || "Lỗi khi tạo nhân khẩu");
+      if (err.error?.code === "HOUSEHOLD_HEAD_EXISTS") {
+        setError("Hộ khẩu này đã có chủ hộ, vui lòng chọn quan hệ khác.");
+      } else {
+        setError(err.error?.message || "Lỗi khi tạo nhân khẩu");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -159,6 +163,8 @@ export default function NhanKhau() {
     { value: "chau", label: "Cháu" },
     { value: "khac", label: "Khác" },
   ];
+
+  const hasChuHoInSelected = nhanKhauList.some((nk) => nk.quanHe === "chu_ho");
 
   return (
     <div className="space-y-6">
@@ -210,33 +216,37 @@ export default function NhanKhau() {
         >
           {hoKhauList.map((hk) => (
             <option key={hk.id} value={hk.id}>
-              {hk.soHoKhau} - {hk.diaChi} ({hk.trangThai === "active" ? "Đã kích hoạt" : "Chưa kích hoạt"})
+              {hk.soHoKhau} - {hk.diaChi} (
+              {hk.trangThai === "active" ? "Đã kích hoạt" : "Chưa kích hoạt"})
             </option>
           ))}
         </select>
       </div>
 
       {/* Activate Button */}
-      {selectedHoKhau && selectedHoKhau.trangThai === "inactive" && chuHoCandidates.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-semibold text-amber-900">
-                Hộ khẩu chưa được kích hoạt
-              </p>
-              <p className="mt-1 text-sm text-amber-700">
-                Có {chuHoCandidates.length} người có thể làm chủ hộ. Hãy kích hoạt hộ khẩu!
-              </p>
+      {selectedHoKhau &&
+        selectedHoKhau.trangThai === "inactive" &&
+        chuHoCandidates.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-amber-900">
+                  Hộ khẩu chưa được kích hoạt
+                </p>
+                <p className="mt-1 text-sm text-amber-700">
+                  Có {chuHoCandidates.length} người có thể làm chủ hộ. Hãy kích
+                  hoạt hộ khẩu!
+                </p>
+              </div>
+              <button
+                onClick={() => setShowActivateModal(true)}
+                className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600"
+              >
+                Kích hoạt hộ khẩu
+              </button>
             </div>
-            <button
-              onClick={() => setShowActivateModal(true)}
-              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600"
-            >
-              Kích hoạt hộ khẩu
-            </button>
           </div>
-        </div>
-      )}
+        )}
 
       {/* Create Form Modal */}
       {showCreateForm && (
@@ -343,11 +353,23 @@ export default function NhanKhau() {
                 >
                   <option value="">Chọn quan hệ</option>
                   {quanHeOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
+                    <option
+                      key={opt.value}
+                      value={opt.value}
+                      disabled={opt.value === "chu_ho" && hasChuHoInSelected}
+                    >
                       {opt.label}
+                      {opt.value === "chu_ho" && hasChuHoInSelected
+                        ? " (đã có chủ hộ)"
+                        : ""}
                     </option>
                   ))}
                 </select>
+                {hasChuHoInSelected && (
+                  <p className="mt-1 text-xs text-red-600">
+                    Hộ khẩu này đã có chủ hộ, không thể chọn thêm chủ hộ.
+                  </p>
+                )}
               </label>
 
               <div className="flex gap-3 pt-4">
@@ -388,7 +410,8 @@ export default function NhanKhau() {
             </div>
 
             <p className="mb-4 text-sm text-gray-600">
-              Chọn người làm chủ hộ cho hộ khẩu <strong>{selectedHoKhau.soHoKhau}</strong>
+              Chọn người làm chủ hộ cho hộ khẩu{" "}
+              <strong>{selectedHoKhau.soHoKhau}</strong>
             </p>
 
             <div className="space-y-2 mb-6">
@@ -509,4 +532,3 @@ export default function NhanKhau() {
     </div>
   );
 }
-
