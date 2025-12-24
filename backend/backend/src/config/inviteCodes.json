@@ -1,0 +1,8 @@
+{
+  "can_bo": {
+    "CB-HK-0001": { "task": "hokhau_nhankhau" },
+    "CB-KN-0001": { "task": "kiennghi" },
+    "CB-TV-0001": { "task": "tamtru_tamvang" },
+    "CB-TK-0001": { "task": "thongke" }
+  }
+}
