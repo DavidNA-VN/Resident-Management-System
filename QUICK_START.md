@@ -1,4 +1,4 @@
-# 🚀 Hướng dẫn chạy ứng dụng
+# 🚀 Hướng dẫn chạy ứng dụng.
 
 ## Cách 1: Chạy tự động (Khuyến nghị)
 
