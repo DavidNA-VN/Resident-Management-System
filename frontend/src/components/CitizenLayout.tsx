@@ -2,7 +2,7 @@ import { ReactNode, useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { apiService, UserInfo } from "../services/api";
 
-interface LayoutProps {
+interface CitizenLayoutProps {
   children: ReactNode;
 }
 
@@ -13,29 +13,16 @@ const roleLabels: Record<string, string> = {
   nguoi_dan: "Người dân",
 };
 
-const taskLabels: Record<string, string> = {
-  hokhau_nhankhau: "Hộ khẩu/Nhân khẩu",
-  tamtru_tamvang: "Tạm trú/Tạm vắng",
-  thongke: "Thống kê",
-  kiennghi: "Kiến nghị",
-};
-
-export default function Layout({ children }: LayoutProps) {
+export default function CitizenLayout({ children }: CitizenLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
   const menuItems = [
-    { path: "/dashboard", label: "Dashboard", icon: "📊" },
-    { path: "/ho-khau", label: "Hộ khẩu", icon: "🏠" },
-    { path: "/nhan-khau", label: "Nhân khẩu", icon: "👥" },
-    { path: "/requests", label: "Yêu cầu", icon: "📋" },
-    { path: "/bien-dong", label: "Biến động", icon: "📝" },
-    { path: "/tam-tru-vang", label: "Tạm trú / Tạm vắng", icon: "📍" },
-    { path: "/phan-anh", label: "Phản ánh", icon: "💬" },
-    { path: "/thong-ke", label: "Thống kê", icon: "📈" },
-    { path: "/bao-cao", label: "Báo cáo", icon: "📄" }
+    { path: "/citizen/home", label: "Trang chủ", icon: "🏠" },
+    { path: "/citizen/yeu-cau", label: "Tạo yêu cầu", icon: "📝" },
+    { path: "/citizen/phan-anh", label: "Phản ánh", icon: "💬" },
   ];
 
   useEffect(() => {
@@ -48,7 +35,6 @@ export default function Layout({ children }: LayoutProps) {
         }
       } catch (err) {
         console.error("Failed to load user info:", err);
-        // Nếu token invalid, logout
         apiService.logout();
         navigate("/");
       }
@@ -72,9 +58,7 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   const userName = userInfo
-    ? `${roleLabels[userInfo.role] || userInfo.role}${
-        userInfo.task ? ` - ${taskLabels[userInfo.task] || userInfo.task}` : ""
-      }`
+    ? `${roleLabels[userInfo.role] || userInfo.role}`
     : "Đang tải...";
 
   return (
@@ -107,32 +91,24 @@ export default function Layout({ children }: LayoutProps) {
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-4 space-y-1">
           <ul className="space-y-1">
-            {menuItems
-              .filter((item) => {
-                // Chỉ hiển thị menu "Yêu cầu" cho to_truong và can_bo
-                if (item.path === "/requests") {
-                  return userInfo?.role === "to_truong" || userInfo?.role === "can_bo";
-                }
-                return true;
-              })
-              .map((item) => {
-                const isActive = location.pathname === item.path;
-                return (
-                  <li key={item.path}>
-                    <Link
-                      to={item.path}
-                      className={`flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 ${
-                        isActive
-                          ? "bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-md shadow-blue-500/25 scale-[1.02]"
-                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 hover:scale-[1.01]"
-                      }`}
-                    >
-                      <span className="text-lg">{item.icon}</span>
-                      {isSidebarOpen && <span>{item.label}</span>}
-                    </Link>
-                  </li>
-                );
-              })}
+            {menuItems.map((item) => {
+              const isActive = location.pathname === item.path;
+              return (
+                <li key={item.path}>
+                  <Link
+                    to={item.path}
+                    className={`flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 ${
+                      isActive
+                        ? "bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-md shadow-blue-500/25 scale-[1.02]"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 hover:scale-[1.01]"
+                    }`}
+                  >
+                    <span className="text-lg">{item.icon}</span>
+                    {isSidebarOpen && <span>{item.label}</span>}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </nav>
 
@@ -163,6 +139,5 @@ export default function Layout({ children }: LayoutProps) {
     </div>
   );
 }
-
 
 

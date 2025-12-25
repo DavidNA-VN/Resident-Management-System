@@ -48,25 +48,71 @@ router.post(
   requireTask("hokhau_nhankhau"),
   async (req, res, next) => {
     try {
-      const { hoKhauId, hoTen, cccd, ngaySinh, gioiTinh, quanHe } = req.body;
-
-      if (!hoKhauId || !hoTen || !quanHe) {
+      const {
+        hoKhauId,
+        hoTen,
+        biDanh,
+        cccd,
+        ngayCapCCCD,
+        noiCapCCCD,
+        ngaySinh,
+        gioiTinh,
+        noiSinh,
+        nguyenQuan,
+        danToc,
+        tonGiao,
+        quocTich,
+        quanHe,
+        ngayDangKyThuongTru,
+        diaChiThuongTruTruoc,
+        ngheNghiep,
+        noiLamViec,
+        ghiChu,
+      } = req.body;
+      const requiredFields = [
+        hoKhauId,
+        hoTen,
+        quanHe,
+        ngaySinh,
+        gioiTinh,
+        noiSinh,
+        nguyenQuan,
+        danToc,
+        tonGiao,
+        quocTich,
+      ];
+      if (requiredFields.some((f) => !f)) {
         return res.status(400).json({
           success: false,
           error: {
             code: "VALIDATION_ERROR",
-            message: "Missing hoKhauId or hoTen or quanHe",
+            message:
+              "Vui lòng nhập đầy đủ các trường bắt buộc (Hộ khẩu, Họ tên, Quan hệ, Ngày sinh, Giới tính, Nơi sinh, Nguyên quán, Dân tộc, Tôn giáo, Quốc tịch)",
           },
         });
       }
 
-      const hoKhauIdNumber = Number(hoKhauId);
-      if (!Number.isInteger(hoKhauIdNumber) || hoKhauIdNumber <= 0) {
+      const optionalFields = [
+        cccd,
+        ngheNghiep,
+        noiLamViec,
+        biDanh,
+        ngayDangKyThuongTru,
+        noiCapCCCD,
+        ngayCapCCCD,
+        diaChiThuongTruTruoc,
+      ];
+
+      const hasMissingOptional = optionalFields.some(
+        (v) => v === undefined || v === null || v === ""
+      );
+      if (hasMissingOptional && (!ghiChu || String(ghiChu).trim() === "")) {
         return res.status(400).json({
           success: false,
           error: {
             code: "VALIDATION_ERROR",
-            message: "Invalid hoKhauId",
+            message:
+              "Vui lòng ghi chú lý do bỏ trống các trường tùy chọn (CCCD, nghề nghiệp, nơi làm việc, bí danh, ngày đăng ký thường trú, nơi cấp CCCD, ngày cấp CCCD, địa chỉ thường trú trước đây)",
           },
         });
       }
@@ -88,58 +134,40 @@ router.post(
         });
       }
 
-      const hoKhauResult = await query<{ id: number; chuHoId: number | null }>(
-        `SELECT id, "chuHoId" FROM ho_khau WHERE id = $1`,
-        [hoKhauIdNumber]
-      );
-
-      if (hoKhauResult.rowCount === 0) {
-        return res.status(404).json({
+      const allowedGioiTinh = ["nam", "nu", "khac", null, undefined, ""];
+      if (!allowedGioiTinh.includes(gioiTinh)) {
+        return res.status(400).json({
           success: false,
-          error: { code: "NOT_FOUND", message: "Hộ khẩu không tồn tại" },
+          error: { code: "VALIDATION_ERROR", message: "Invalid gioiTinh" },
         });
-      }
-
-      if (quanHe === "chu_ho") {
-        if (hoKhauResult.rows[0].chuHoId) {
-          return res.status(400).json({
-            success: false,
-            error: {
-              code: "HOUSEHOLD_HEAD_EXISTS",
-              message: "Hộ khẩu này đã có chủ hộ",
-            },
-          });
-        }
-
-        const existingChuHo = await query(
-          `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 AND "quanHe" = 'chu_ho' LIMIT 1`,
-          [hoKhauIdNumber]
-        );
-
-        if ((existingChuHo.rowCount ?? 0) > 0) {
-          return res.status(400).json({
-            success: false,
-            error: {
-              code: "HOUSEHOLD_HEAD_EXISTS",
-              message: "Hộ khẩu này đã có chủ hộ",
-            },
-          });
-        }
       }
 
       const r = await query(
         `INSERT INTO nhan_khau
-         ("hoKhauId","hoTen","cccd","ngaySinh","gioiTinh","quanHe")
+         ("hoKhauId","hoTen","biDanh","cccd","ngayCapCCCD","noiCapCCCD","ngaySinh","gioiTinh","noiSinh","nguyenQuan","danToc","tonGiao","quocTich","quanHe","ngayDangKyThuongTru","diaChiThuongTruTruoc","ngheNghiep","noiLamViec","ghiChu")
          VALUES
-         ($1,$2,$3,$4,$5,$6)
+         ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
          RETURNING *`,
         [
-          hoKhauIdNumber,
+          hoKhauId,
           hoTen,
+          biDanh ?? null,
           cccd ?? null,
+          ngayCapCCCD ?? null,
+          noiCapCCCD ?? null,
           ngaySinh ?? null,
           gioiTinh ?? null,
+          noiSinh ?? null,
+          nguyenQuan ?? null,
+          danToc ?? null,
+          tonGiao ?? null,
+          quocTich ?? null,
           quanHe,
+          ngayDangKyThuongTru ?? null,
+          diaChiThuongTruTruoc ?? null,
+          ngheNghiep ?? null,
+          noiLamViec ?? null,
+          ghiChu ?? null,
         ]
       );
 
@@ -150,7 +178,38 @@ router.post(
   }
 );
 
-export default router;
+/**
+ * GET /nhan-khau/:id
+ * Lấy chi tiết một nhân khẩu
+ */
+router.get(
+  "/nhan-khau/:id",
+  requireAuth,
+  requireTask("hokhau_nhankhau"),
+  async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          error: { code: "VALIDATION_ERROR", message: "Missing id" },
+        });
+      }
+
+      const r = await query(`SELECT * FROM nhan_khau WHERE id = $1`, [id]);
+      if (r.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Nhân khẩu không tồn tại" },
+        });
+      }
+
+      return res.json({ success: true, data: r.rows[0] });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 /**
  * PATCH /nhan-khau/:id
@@ -162,126 +221,158 @@ router.patch(
   requireTask("hokhau_nhankhau"),
   async (req, res, next) => {
     try {
-      const nhanKhauId = Number(req.params.id);
-      if (!Number.isInteger(nhanKhauId) || nhanKhauId <= 0) {
+      const id = Number(req.params.id);
+      if (!id) {
         return res.status(400).json({
           success: false,
-          error: { code: "VALIDATION_ERROR", message: "Invalid nhanKhauId" },
+          error: { code: "VALIDATION_ERROR", message: "Missing id" },
         });
       }
 
-      const current = await query(`SELECT * FROM nhan_khau WHERE id = $1`, [
-        nhanKhauId,
-      ]);
+      const {
+        hoTen,
+        biDanh,
+        cccd,
+        ngayCapCCCD,
+        noiCapCCCD,
+        ngaySinh,
+        gioiTinh,
+        noiSinh,
+        nguyenQuan,
+        danToc,
+        tonGiao,
+        quocTich,
+        quanHe,
+        ngayDangKyThuongTru,
+        diaChiThuongTruTruoc,
+        ngheNghiep,
+        noiLamViec,
+        ghiChu,
+      } = req.body;
 
-      if (current.rowCount === 0) {
+      const fields: { column: string; value: any }[] = [];
+      if (hoTen !== undefined) fields.push({ column: "hoTen", value: hoTen });
+      if (biDanh !== undefined)
+        fields.push({ column: "biDanh", value: biDanh });
+      if (cccd !== undefined) fields.push({ column: "cccd", value: cccd });
+      if (ngayCapCCCD !== undefined)
+        fields.push({ column: "ngayCapCCCD", value: ngayCapCCCD });
+      if (noiCapCCCD !== undefined)
+        fields.push({ column: "noiCapCCCD", value: noiCapCCCD });
+      if (ngaySinh !== undefined)
+        fields.push({ column: "ngaySinh", value: ngaySinh });
+      if (gioiTinh !== undefined)
+        fields.push({ column: "gioiTinh", value: gioiTinh });
+      if (noiSinh !== undefined)
+        fields.push({ column: "noiSinh", value: noiSinh });
+      if (nguyenQuan !== undefined)
+        fields.push({ column: "nguyenQuan", value: nguyenQuan });
+      if (danToc !== undefined)
+        fields.push({ column: "danToc", value: danToc });
+      if (tonGiao !== undefined)
+        fields.push({ column: "tonGiao", value: tonGiao });
+      if (quocTich !== undefined)
+        fields.push({ column: "quocTich", value: quocTich });
+      if (quanHe !== undefined)
+        fields.push({ column: "quanHe", value: quanHe });
+      if (ngayDangKyThuongTru !== undefined)
+        fields.push({
+          column: "ngayDangKyThuongTru",
+          value: ngayDangKyThuongTru,
+        });
+      if (diaChiThuongTruTruoc !== undefined)
+        fields.push({
+          column: "diaChiThuongTruTruoc",
+          value: diaChiThuongTruTruoc,
+        });
+      if (ngheNghiep !== undefined)
+        fields.push({ column: "ngheNghiep", value: ngheNghiep });
+      if (noiLamViec !== undefined)
+        fields.push({ column: "noiLamViec", value: noiLamViec });
+      if (ghiChu !== undefined)
+        fields.push({ column: "ghiChu", value: ghiChu });
+
+      const optionalFields = [
+        cccd,
+        ngheNghiep,
+        noiLamViec,
+        biDanh,
+        ngayDangKyThuongTru,
+        noiCapCCCD,
+        ngayCapCCCD,
+        diaChiThuongTruTruoc,
+      ];
+      const providedMissingOptional = optionalFields.some(
+        (v) => v !== undefined && (v === null || v === "")
+      );
+      if (providedMissingOptional && (ghiChu === undefined || ghiChu === "")) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message:
+              "Vui lòng ghi chú lý do bỏ trống các trường tùy chọn (CCCD, nghề nghiệp, nơi làm việc, bí danh, ngày đăng ký thường trú, nơi cấp CCCD, ngày cấp CCCD, địa chỉ thường trú trước đây)",
+          },
+        });
+      }
+
+      if (fields.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Không có trường nào để cập nhật",
+          },
+        });
+      }
+
+      if (quanHe !== undefined) {
+        const allowedQuanHe = [
+          "chu_ho",
+          "vo_chong",
+          "con",
+          "cha_me",
+          "anh_chi_em",
+          "ong_ba",
+          "chau",
+          "khac",
+        ];
+        if (!allowedQuanHe.includes(quanHe)) {
+          return res.status(400).json({
+            success: false,
+            error: { code: "VALIDATION_ERROR", message: "Invalid quanHe" },
+          });
+        }
+      }
+
+      if (gioiTinh !== undefined) {
+        const allowedGioiTinh = ["nam", "nu", "khac", null, ""];
+        if (!allowedGioiTinh.includes(gioiTinh)) {
+          return res.status(400).json({
+            success: false,
+            error: { code: "VALIDATION_ERROR", message: "Invalid gioiTinh" },
+          });
+        }
+      }
+
+      const setClauses = fields
+        .map((f, idx) => `"${f.column}" = $${idx + 1}`)
+        .join(", ");
+      const values = fields.map((f) => (f.value === "" ? null : f.value));
+
+      const r = await query(
+        `UPDATE nhan_khau SET ${setClauses} WHERE id = $${
+          fields.length + 1
+        } RETURNING *`,
+        [...values, id]
+      );
+
+      if (r.rowCount === 0) {
         return res.status(404).json({
           success: false,
           error: { code: "NOT_FOUND", message: "Nhân khẩu không tồn tại" },
         });
       }
-
-      const allowedQuanHe = [
-        "chu_ho",
-        "vo_chong",
-        "con",
-        "cha_me",
-        "anh_chi_em",
-        "ong_ba",
-        "chau",
-        "khac",
-      ];
-
-      const existing = current.rows[0];
-      const { hoTen, cccd, ngaySinh, gioiTinh, quanHe } = req.body as any;
-
-      if (gioiTinh && !["nam", "nu", "khac"].includes(gioiTinh)) {
-        return res.status(400).json({
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Invalid gioiTinh" },
-        });
-      }
-
-      if (quanHe && !allowedQuanHe.includes(quanHe)) {
-        return res.status(400).json({
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Invalid quanHe" },
-        });
-      }
-
-      const merged = {
-        hoTen: hoTen ?? existing.hoTen,
-        cccd: cccd ?? existing.cccd,
-        ngaySinh: ngaySinh ?? existing.ngaySinh,
-        gioiTinh: gioiTinh ?? existing.gioiTinh,
-        quanHe: quanHe ?? existing.quanHe,
-      };
-
-      if (!merged.hoTen || !merged.quanHe) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "Missing hoTen or quanHe",
-          },
-        });
-      }
-
-      // Nếu chuyển sang chủ hộ, kiểm tra hộ đã có chủ hộ chưa
-      if (merged.quanHe === "chu_ho") {
-        const hoKhauId = existing.hoKhauId;
-        const hoKhauResult = await query<{
-          id: number;
-          chuHoId: number | null;
-        }>(`SELECT id, "chuHoId" FROM ho_khau WHERE id = $1`, [hoKhauId]);
-
-        if (
-          hoKhauResult.rows[0]?.chuHoId &&
-          hoKhauResult.rows[0].chuHoId !== nhanKhauId
-        ) {
-          return res.status(400).json({
-            success: false,
-            error: {
-              code: "HOUSEHOLD_HEAD_EXISTS",
-              message: "Hộ khẩu này đã có chủ hộ",
-            },
-          });
-        }
-
-        const existingChuHo = await query(
-          `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 AND "quanHe" = 'chu_ho' AND id <> $2 LIMIT 1`,
-          [hoKhauId, nhanKhauId]
-        );
-
-        if ((existingChuHo.rowCount ?? 0) > 0) {
-          return res.status(400).json({
-            success: false,
-            error: {
-              code: "HOUSEHOLD_HEAD_EXISTS",
-              message: "Hộ khẩu này đã có chủ hộ",
-            },
-          });
-        }
-      }
-
-      const r = await query(
-        `UPDATE nhan_khau
-         SET "hoTen" = $1,
-             "cccd" = $2,
-             "ngaySinh" = $3,
-             "gioiTinh" = $4,
-             "quanHe" = $5
-         WHERE id = $6
-         RETURNING *`,
-        [
-          merged.hoTen,
-          merged.cccd ?? null,
-          merged.ngaySinh ?? null,
-          merged.gioiTinh ?? null,
-          merged.quanHe,
-          nhanKhauId,
-        ]
-      );
 
       return res.json({ success: true, data: r.rows[0] });
     } catch (err) {
@@ -289,3 +380,5 @@ router.patch(
     }
   }
 );
+
+export default router;

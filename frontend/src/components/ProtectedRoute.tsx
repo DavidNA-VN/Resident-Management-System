@@ -1,14 +1,16 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
-import { apiService } from "../services/api";
+import { apiService, UserInfo } from "../services/api";
 
 interface ProtectedRouteProps {
   children: ReactNode;
+  allowedRoles?: string[];
 }
 
-export default function ProtectedRoute({ children }: ProtectedRouteProps) {
+export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -24,6 +26,7 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
         const response = await apiService.getMe();
         if (response.success) {
           setIsAuthenticated(true);
+          setUserInfo(response.data);
           localStorage.setItem("userInfo", JSON.stringify(response.data));
         } else {
           setIsAuthenticated(false);
@@ -53,6 +56,16 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   if (!isAuthenticated) {
     return <Navigate to="/" replace />;
+  }
+
+  // Check role if allowedRoles is specified
+  if (allowedRoles && userInfo && !allowedRoles.includes(userInfo.role)) {
+    // Redirect based on role
+    if (userInfo.role === "nguoi_dan") {
+      return <Navigate to="/citizen/home" replace />;
+    } else {
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
   return <>{children}</>;

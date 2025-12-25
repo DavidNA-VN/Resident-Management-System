@@ -4,6 +4,9 @@ import authRoutes from "./routes/auth.routes";
 import testRoutes from "./routes/test.routes";
 import hokhauRoutes from "./routes/hokhau.routes";
 import nhankhauRoutes from "./routes/nhankhau.routes";
+import citizenRoutes from "./routes/citizen.routes";
+import requestsRoutes from "./routes/requests.routes";
+import feedbackRoutes from "./routes/feedback.routes";
 const PORT = Number(process.env.PORT || 3000);
 
 app.use(healthRoutes);
@@ -11,6 +14,9 @@ app.use(authRoutes);
 app.use(testRoutes);
 app.use(hokhauRoutes);
 app.use(nhankhauRoutes);
+app.use(citizenRoutes);
+app.use(requestsRoutes);
+app.use(feedbackRoutes);
 
 app.use((err: any, _req: any, res: any, _next: any) => {
   console.error(err);

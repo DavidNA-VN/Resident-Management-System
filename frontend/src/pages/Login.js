@@ -30,7 +30,13 @@ export default function Login() {
                 localStorage.setItem("userInfo", JSON.stringify(response.data.user));
                 localStorage.setItem("isAuthenticated", "true");
                 setModalType(null);
-                navigate("/dashboard");
+                // Redirect based on role
+                if (response.data.user.role === "nguoi_dan") {
+                    navigate("/citizen/home");
+                }
+                else {
+                    navigate("/dashboard");
+                }
             }
         }
         catch (err) {

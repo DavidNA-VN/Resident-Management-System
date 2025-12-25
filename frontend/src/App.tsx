@@ -1,11 +1,15 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
+import CitizenLayout from "./components/CitizenLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import HoKhau from "./pages/HoKhau";
 import NhanKhau from "./pages/NhanKhau";
-import YeuCau from "./pages/YeuCau";
+import CitizenHome from "./pages/citizen/Home";
+import YeuCau from "./pages/citizen/YeuCau";
+import PhanAnh from "./pages/citizen/PhanAnh";
+import Requests from "./pages/Requests";
 
 function App() {
   return (
@@ -15,7 +19,7 @@ function App() {
         <Route
           path="/dashboard"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
                 <Dashboard />
               </Layout>
@@ -25,7 +29,7 @@ function App() {
         <Route
           path="/ho-khau"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
                 <HoKhau />
               </Layout>
@@ -35,7 +39,7 @@ function App() {
         <Route
           path="/nhan-khau"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
                 <NhanKhau />
               </Layout>
@@ -43,11 +47,11 @@ function App() {
           }
         />
         <Route
-          path="/yeu-cau"
+          path="/requests"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
-                <YeuCau />
+                <Requests />
               </Layout>
             </ProtectedRoute>
           }
@@ -55,15 +59,13 @@ function App() {
         <Route
           path="/bien-dong"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
                 <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Biến động Nhân khẩu
                   </h1>
-                  <p className="mt-2 text-gray-600">
-                    Trang này đang được phát triển...
-                  </p>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
                 </div>
               </Layout>
             </ProtectedRoute>
@@ -72,15 +74,13 @@ function App() {
         <Route
           path="/tam-tru-vang"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
                 <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Tạm trú / Tạm vắng
                   </h1>
-                  <p className="mt-2 text-gray-600">
-                    Trang này đang được phát triển...
-                  </p>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
                 </div>
               </Layout>
             </ProtectedRoute>
@@ -89,15 +89,13 @@ function App() {
         <Route
           path="/phan-anh"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
                 <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Phản ánh Kiến nghị
                   </h1>
-                  <p className="mt-2 text-gray-600">
-                    Trang này đang được phát triển...
-                  </p>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
                 </div>
               </Layout>
             </ProtectedRoute>
@@ -106,15 +104,13 @@ function App() {
         <Route
           path="/thong-ke"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
                 <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Thống kê
                   </h1>
-                  <p className="mt-2 text-gray-600">
-                    Trang này đang được phát triển...
-                  </p>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
                 </div>
               </Layout>
             </ProtectedRoute>
@@ -123,17 +119,46 @@ function App() {
         <Route
           path="/bao-cao"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
                 <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
                   <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
                     Báo cáo
                   </h1>
-                  <p className="mt-2 text-gray-600">
-                    Trang này đang được phát triển...
-                  </p>
+                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
                 </div>
               </Layout>
+            </ProtectedRoute>
+          }
+        />
+        {/* Citizen Routes */}
+        <Route
+          path="/citizen/home"
+          element={
+            <ProtectedRoute allowedRoles={["nguoi_dan"]}>
+              <CitizenLayout>
+                <CitizenHome />
+              </CitizenLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/citizen/yeu-cau"
+          element={
+            <ProtectedRoute allowedRoles={["nguoi_dan"]}>
+              <CitizenLayout>
+                <YeuCau />
+              </CitizenLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/citizen/phan-anh"
+          element={
+            <ProtectedRoute allowedRoles={["nguoi_dan"]}>
+              <CitizenLayout>
+                <PhanAnh />
+              </CitizenLayout>
             </ProtectedRoute>
           }
         />
