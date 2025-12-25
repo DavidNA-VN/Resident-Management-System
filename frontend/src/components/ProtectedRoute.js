@@ -2,9 +2,10 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { apiService } from "../services/api";
-export default function ProtectedRoute({ children }) {
+export default function ProtectedRoute({ children, allowedRoles }) {
     const [isAuthenticated, setIsAuthenticated] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [userInfo, setUserInfo] = useState(null);
     useEffect(() => {
         const checkAuth = async () => {
             const token = localStorage.getItem("accessToken");
@@ -18,6 +19,7 @@ export default function ProtectedRoute({ children }) {
                 const response = await apiService.getMe();
                 if (response.success) {
                     setIsAuthenticated(true);
+                    setUserInfo(response.data);
                     localStorage.setItem("userInfo", JSON.stringify(response.data));
                 }
                 else {
@@ -40,6 +42,16 @@ export default function ProtectedRoute({ children }) {
     }
     if (!isAuthenticated) {
         return _jsx(Navigate, { to: "/", replace: true });
+    }
+    // Check role if allowedRoles is specified
+    if (allowedRoles && userInfo && !allowedRoles.includes(userInfo.role)) {
+        // Redirect based on role
+        if (userInfo.role === "nguoi_dan") {
+            return _jsx(Navigate, { to: "/citizen/home", replace: true });
+        }
+        else {
+            return _jsx(Navigate, { to: "/dashboard", replace: true });
+        }
     }
     return _jsx(_Fragment, { children: children });
 }

@@ -8,27 +8,15 @@ const roleLabels = {
     can_bo: "Cán bộ",
     nguoi_dan: "Người dân",
 };
-const taskLabels = {
-    hokhau_nhankhau: "Hộ khẩu/Nhân khẩu",
-    tamtru_tamvang: "Tạm trú/Tạm vắng",
-    thongke: "Thống kê",
-    kiennghi: "Kiến nghị",
-};
-export default function Layout({ children }) {
+export default function CitizenLayout({ children }) {
     const location = useLocation();
     const navigate = useNavigate();
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [userInfo, setUserInfo] = useState(null);
     const menuItems = [
-        { path: "/dashboard", label: "Dashboard", icon: "📊" },
-        { path: "/ho-khau", label: "Hộ khẩu", icon: "🏠" },
-        { path: "/nhan-khau", label: "Nhân khẩu", icon: "👥" },
-        { path: "/requests", label: "Yêu cầu", icon: "📋" },
-        { path: "/bien-dong", label: "Biến động", icon: "📝" },
-        { path: "/tam-tru-vang", label: "Tạm trú / Tạm vắng", icon: "📍" },
-        { path: "/phan-anh", label: "Phản ánh", icon: "💬" },
-        { path: "/thong-ke", label: "Thống kê", icon: "📈" },
-        { path: "/bao-cao", label: "Báo cáo", icon: "📄" }
+        { path: "/citizen/home", label: "Trang chủ", icon: "🏠" },
+        { path: "/citizen/yeu-cau", label: "Tạo yêu cầu", icon: "📝" },
+        { path: "/citizen/phan-anh", label: "Phản ánh", icon: "💬" },
     ];
     useEffect(() => {
         const loadUserInfo = async () => {
@@ -41,7 +29,6 @@ export default function Layout({ children }) {
             }
             catch (err) {
                 console.error("Failed to load user info:", err);
-                // Nếu token invalid, logout
                 apiService.logout();
                 navigate("/");
             }
@@ -62,17 +49,9 @@ export default function Layout({ children }) {
         navigate("/");
     };
     const userName = userInfo
-        ? `${roleLabels[userInfo.role] || userInfo.role}${userInfo.task ? ` - ${taskLabels[userInfo.task] || userInfo.task}` : ""}`
+        ? `${roleLabels[userInfo.role] || userInfo.role}`
         : "Đang tải...";
-    return (_jsxs("div", { className: "flex h-screen overflow-hidden bg-gradient-to-br from-gray-50 via-white to-gray-50", children: [_jsxs("aside", { className: `${isSidebarOpen ? "w-64" : "w-20"} border-r border-gray-200/80 bg-white/95 backdrop-blur-sm shadow-lg transition-all duration-300 flex flex-col`, children: [_jsxs("div", { className: "flex h-16 items-center justify-between border-b border-gray-200/60 px-4 bg-gradient-to-r from-blue-50/50 to-cyan-50/30", children: [isSidebarOpen && (_jsxs("div", { children: [_jsx("h1", { className: "text-lg font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent", children: "Qu\u1EA3n l\u00FD D\u00E2n c\u01B0" }), _jsx("p", { className: "text-xs text-gray-500 mt-0.5", children: "TDP7 La Kh\u00EA" })] })), _jsx("button", { onClick: () => setIsSidebarOpen(!isSidebarOpen), className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors", "aria-label": "Toggle sidebar", children: isSidebarOpen ? "◀" : "▶" })] }), _jsx("nav", { className: "flex-1 overflow-y-auto p-4 space-y-1", children: _jsx("ul", { className: "space-y-1", children: menuItems
-                                .filter((item) => {
-                                // Chỉ hiển thị menu "Yêu cầu" cho to_truong và can_bo
-                                if (item.path === "/requests") {
-                                    return userInfo?.role === "to_truong" || userInfo?.role === "can_bo";
-                                }
-                                return true;
-                            })
-                                .map((item) => {
+    return (_jsxs("div", { className: "flex h-screen overflow-hidden bg-gradient-to-br from-gray-50 via-white to-gray-50", children: [_jsxs("aside", { className: `${isSidebarOpen ? "w-64" : "w-20"} border-r border-gray-200/80 bg-white/95 backdrop-blur-sm shadow-lg transition-all duration-300 flex flex-col`, children: [_jsxs("div", { className: "flex h-16 items-center justify-between border-b border-gray-200/60 px-4 bg-gradient-to-r from-blue-50/50 to-cyan-50/30", children: [isSidebarOpen && (_jsxs("div", { children: [_jsx("h1", { className: "text-lg font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent", children: "Qu\u1EA3n l\u00FD D\u00E2n c\u01B0" }), _jsx("p", { className: "text-xs text-gray-500 mt-0.5", children: "TDP7 La Kh\u00EA" })] })), _jsx("button", { onClick: () => setIsSidebarOpen(!isSidebarOpen), className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors", "aria-label": "Toggle sidebar", children: isSidebarOpen ? "◀" : "▶" })] }), _jsx("nav", { className: "flex-1 overflow-y-auto p-4 space-y-1", children: _jsx("ul", { className: "space-y-1", children: menuItems.map((item) => {
                                 const isActive = location.pathname === item.path;
                                 return (_jsx("li", { children: _jsxs(Link, { to: item.path, className: `flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 ${isActive
                                             ? "bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-md shadow-blue-500/25 scale-[1.02]"

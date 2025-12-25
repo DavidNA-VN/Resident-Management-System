@@ -1,5 +1,4 @@
-import { useState, useEffect, FormEvent } from "react";
-import { createPortal } from "react-dom";
+import { FormEvent, useEffect, useState } from "react";
 import { apiService } from "../services/api";
 
 interface HoKhau {
@@ -11,41 +10,101 @@ interface HoKhau {
   phuongXa?: string;
   duongPho?: string;
   soNha?: string;
-  diaChiDayDu?: string;
   ngayCap?: string;
   ghiChu?: string;
+  diaChiDayDu?: string;
   trangThai: string;
   chuHoId?: number;
   createdAt: string;
 }
 
+interface NhanKhau {
+  id: number;
+  hoTen: string;
+  cccd?: string;
+  quanHe: string;
+  gioiTinh?: string;
+  ngaySinh?: string;
+  hoKhauId?: number;
+}
+
+type NhanKhauFull = NhanKhau & {
+  biDanh?: string;
+  ngayCapCCCD?: string;
+  noiCapCCCD?: string;
+  noiSinh?: string;
+  nguyenQuan?: string;
+  danToc?: string;
+  tonGiao?: string;
+  quocTich?: string;
+  ngayDangKyThuongTru?: string;
+  diaChiThuongTruTruoc?: string;
+  ngheNghiep?: string;
+  noiLamViec?: string;
+};
+
+const quanHeLabel: Record<string, string> = {
+  chu_ho: "Chủ hộ",
+  vo_chong: "Vợ/Chồng",
+  con: "Con",
+  cha_me: "Cha/Mẹ",
+  anh_chi_em: "Anh/Chị/Em",
+  ong_ba: "Ông/Bà",
+  chau: "Cháu",
+  khac: "Khác",
+};
+
 export default function HoKhau() {
   const [hoKhauList, setHoKhauList] = useState<HoKhau[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [showViewModal, setShowViewModal] = useState(false);
-  const [viewHoKhau, setViewHoKhau] = useState<HoKhau | null>(null);
-  const [nhanKhauTrongHo, setNhanKhauTrongHo] = useState<any[]>([]);
+
+  const [viewingHoKhau, setViewingHoKhau] = useState<HoKhau | null>(null);
+  const [editingHoKhau, setEditingHoKhau] = useState<HoKhau | null>(null);
+  const [viewNhanKhau, setViewNhanKhau] = useState<NhanKhau[]>([]);
   const [viewLoading, setViewLoading] = useState(false);
-  const [showEditForm, setShowEditForm] = useState(false);
-  const [editingHoKhauId, setEditingHoKhauId] = useState<number | null>(null);
-  const [selectedNhanKhau, setSelectedNhanKhau] = useState<any | null>(null);
-  const [showViewNhanKhau, setShowViewNhanKhau] = useState(false);
-  const [showEditNhanKhau, setShowEditNhanKhau] = useState(false);
-  const [editNhanKhauData, setEditNhanKhauData] = useState({
+  const [viewError, setViewError] = useState<string | null>(null);
+
+  const emptyMemberFull: NhanKhauFull = {
+    id: 0,
     hoTen: "",
+    hoKhauId: undefined,
+    quanHe: "",
+    biDanh: "",
     cccd: "",
+    ngayCapCCCD: "",
+    noiCapCCCD: "",
     ngaySinh: "",
     gioiTinh: "",
-    quanHe: "",
-  });
+    noiSinh: "",
+    nguyenQuan: "",
+    danToc: "",
+    tonGiao: "",
+    quocTich: "Việt Nam",
+    ngayDangKyThuongTru: "",
+    diaChiThuongTruTruoc: "",
+    ngheNghiep: "",
+    noiLamViec: "",
+  };
 
-  // Form state
+  const [memberViewForm, setMemberViewForm] = useState<NhanKhauFull>({
+    ...emptyMemberFull,
+  });
+  const [viewingNhanKhauDetail, setViewingNhanKhauDetail] =
+    useState<NhanKhauFull | null>(null);
+  const [showMemberViewModal, setShowMemberViewModal] = useState(false);
+  const [memberViewLoading, setMemberViewLoading] = useState(false);
+  const [memberViewSaving, setMemberViewSaving] = useState(false);
+  const [memberViewError, setMemberViewError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     soHoKhau: "",
     diaChi: "",
+    diaChiDayDu: "",
     tinhThanh: "",
     quanHuyen: "",
     phuongXa: "",
@@ -54,9 +113,11 @@ export default function HoKhau() {
     ngayCap: "",
     ghiChu: "",
   });
-  const [editData, setEditData] = useState({
+
+  const [editFormData, setEditFormData] = useState({
     soHoKhau: "",
     diaChi: "",
+    diaChiDayDu: "",
     tinhThanh: "",
     quanHuyen: "",
     phuongXa: "",
@@ -84,65 +145,212 @@ export default function HoKhau() {
     }
   };
 
-  const openViewModal = async (hk: HoKhau) => {
-    setViewHoKhau(hk);
+  const loadMembers = async (hoKhauId: number) => {
+    const membersRes = await apiService.getNhanKhauList(hoKhauId);
+    if (membersRes.success) {
+      const members = [...membersRes.data];
+      members.sort((a, b) => {
+        if (a.quanHe === "chu_ho" && b.quanHe !== "chu_ho") return -1;
+        if (a.quanHe !== "chu_ho" && b.quanHe === "chu_ho") return 1;
+        return a.hoTen.localeCompare(b.hoTen, "vi");
+      });
+      setViewNhanKhau(members);
+    }
+  };
+
+  const openViewHousehold = async (hoKhau: HoKhau) => {
+    setViewingHoKhau(hoKhau);
     setShowViewModal(true);
     setViewLoading(true);
+    setViewError(null);
+
     try {
-      const response = await apiService.getNhanKhauList(hk.id);
-      if (response.success) {
-        setNhanKhauTrongHo(response.data);
+      const detailRes = await apiService.getHoKhauById(hoKhau.id);
+      if (detailRes.success) {
+        setViewingHoKhau(detailRes.data);
       }
+      await loadMembers(hoKhau.id);
     } catch (err: any) {
-      setError(err.error?.message || "Lỗi khi tải danh sách nhân khẩu của hộ");
+      setViewError(err.error?.message || "Lỗi khi tải thông tin hộ khẩu");
     } finally {
       setViewLoading(false);
     }
   };
 
-  const openViewNhanKhau = (nk: any) => {
-    setSelectedNhanKhau(nk);
-    setShowViewNhanKhau(true);
-  };
-
-  const openEditNhanKhau = (nk: any) => {
-    setSelectedNhanKhau(nk);
-    setEditNhanKhauData({
-      hoTen: nk.hoTen || "",
-      cccd: nk.cccd || "",
-      ngaySinh: nk.ngaySinh ? nk.ngaySinh.substring(0, 10) : "",
-      gioiTinh: nk.gioiTinh || "",
-      quanHe: nk.quanHe || "",
-    });
-    setShowEditNhanKhau(true);
-  };
-
-  const closeNhanKhauModals = () => {
-    setShowViewNhanKhau(false);
-    setShowEditNhanKhau(false);
-    setSelectedNhanKhau(null);
-  };
-
-  const closeViewModal = () => {
+  const closeViewHousehold = () => {
     setShowViewModal(false);
-    setViewHoKhau(null);
-    setNhanKhauTrongHo([]);
+    setViewingHoKhau(null);
+    setViewNhanKhau([]);
+    setViewError(null);
+    setShowMemberViewModal(false);
+    setViewingNhanKhauDetail(null);
+    setMemberViewError(null);
   };
 
-  const openEditForm = (hk: HoKhau) => {
-    setEditingHoKhauId(hk.id);
-    setEditData({
-      soHoKhau: hk.soHoKhau || "",
-      diaChi: hk.diaChi || "",
-      tinhThanh: hk.tinhThanh || "",
-      quanHuyen: hk.quanHuyen || "",
-      phuongXa: hk.phuongXa || "",
-      duongPho: hk.duongPho || "",
-      soNha: hk.soNha || "",
-      ngayCap: hk.ngayCap ? hk.ngayCap.substring(0, 10) : "",
-      ghiChu: hk.ghiChu || "",
-    });
-    setShowEditForm(true);
+  const openViewNhanKhau = async (id: number) => {
+    setMemberViewError(null);
+    setMemberViewLoading(true);
+    setShowMemberViewModal(true);
+    try {
+      const res = await apiService.getNhanKhauById(id);
+      if (res.success) {
+        const nk = res.data as NhanKhauFull;
+        setViewingNhanKhauDetail(nk);
+        setMemberViewForm({
+          ...emptyMemberFull,
+          ...nk,
+          hoKhauId: nk.hoKhauId,
+          ngayCapCCCD: nk.ngayCapCCCD ? nk.ngayCapCCCD.substring(0, 10) : "",
+          ngayDangKyThuongTru: nk.ngayDangKyThuongTru
+            ? nk.ngayDangKyThuongTru.substring(0, 10)
+            : "",
+          ngaySinh: nk.ngaySinh ? nk.ngaySinh.substring(0, 10) : "",
+        });
+      } else {
+        setMemberViewError(
+          res.error?.message || "Không lấy được thông tin nhân khẩu"
+        );
+      }
+    } catch (err: any) {
+      setMemberViewError(
+        err.error?.message || "Lỗi khi tải thông tin nhân khẩu"
+      );
+    } finally {
+      setMemberViewLoading(false);
+    }
+  };
+
+  const handleUpdateNhanKhauFull = async () => {
+    if (!viewingNhanKhauDetail) return;
+    setMemberViewError(null);
+    setMemberViewSaving(true);
+    try {
+      const payload = {
+        hoTen: memberViewForm.hoTen || undefined,
+        biDanh: memberViewForm.biDanh || undefined,
+        cccd: memberViewForm.cccd || undefined,
+        ngayCapCCCD: memberViewForm.ngayCapCCCD || undefined,
+        noiCapCCCD: memberViewForm.noiCapCCCD || undefined,
+        ngaySinh: memberViewForm.ngaySinh || undefined,
+        gioiTinh:
+          memberViewForm.gioiTinh === "nam" ||
+          memberViewForm.gioiTinh === "nu" ||
+          memberViewForm.gioiTinh === "khac"
+            ? memberViewForm.gioiTinh
+            : undefined,
+        noiSinh: memberViewForm.noiSinh || undefined,
+        nguyenQuan: memberViewForm.nguyenQuan || undefined,
+        danToc: memberViewForm.danToc || undefined,
+        tonGiao: memberViewForm.tonGiao || undefined,
+        quocTich: memberViewForm.quocTich || undefined,
+        quanHe: (memberViewForm.quanHe || undefined) as any,
+        ngayDangKyThuongTru: memberViewForm.ngayDangKyThuongTru || undefined,
+        diaChiThuongTruTruoc: memberViewForm.diaChiThuongTruTruoc || undefined,
+        ngheNghiep: memberViewForm.ngheNghiep || undefined,
+        noiLamViec: memberViewForm.noiLamViec || undefined,
+      };
+
+      const res = await apiService.updateNhanKhau(
+        viewingNhanKhauDetail.id,
+        payload
+      );
+      if (res.success) {
+        if (viewingHoKhau) await loadMembers(viewingHoKhau.id);
+        setShowMemberViewModal(false);
+        setViewingNhanKhauDetail(null);
+      } else {
+        setMemberViewError(
+          res.error?.message || "Không thể cập nhật nhân khẩu"
+        );
+      }
+    } catch (err: any) {
+      setMemberViewError(err.error?.message || "Lỗi khi cập nhật nhân khẩu");
+    } finally {
+      setMemberViewSaving(false);
+    }
+  };
+
+  const openEditHousehold = async (hoKhau: HoKhau) => {
+    setEditingHoKhau(hoKhau);
+    setShowEditModal(true);
+    setError(null);
+
+    try {
+      const response = await apiService.getHoKhauById(hoKhau.id);
+      if (response.success) {
+        const data = response.data;
+        setEditFormData({
+          soHoKhau: data.soHoKhau || "",
+          diaChi: data.diaChi || "",
+          diaChiDayDu: data.diaChiDayDu || "",
+          tinhThanh: data.tinhThanh || "",
+          quanHuyen: data.quanHuyen || "",
+          phuongXa: data.phuongXa || "",
+          duongPho: data.duongPho || "",
+          soNha: data.soNha || "",
+          ngayCap: data.ngayCap ? data.ngayCap.substring(0, 10) : "",
+          ghiChu: data.ghiChu || "",
+        });
+      }
+    } catch (err: any) {
+      setError(err.error?.message || "Lỗi khi tải thông tin hộ khẩu");
+    }
+  };
+
+  const handleUpdate = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editingHoKhau) return;
+
+    if (!editFormData.soHoKhau || !editFormData.diaChi) {
+      setError("Vui lòng điền số hộ khẩu và địa chỉ");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const payload = {
+        soHoKhau: editFormData.soHoKhau,
+        diaChi: editFormData.diaChi,
+        diaChiDayDu: editFormData.diaChiDayDu || undefined,
+        tinhThanh: editFormData.tinhThanh || undefined,
+        quanHuyen: editFormData.quanHuyen || undefined,
+        phuongXa: editFormData.phuongXa || undefined,
+        duongPho: editFormData.duongPho || undefined,
+        soNha: editFormData.soNha || undefined,
+        ngayCap: editFormData.ngayCap || undefined,
+        ghiChu: editFormData.ghiChu || undefined,
+      };
+
+      const response = await apiService.updateHoKhau(editingHoKhau.id, payload);
+
+      if (response.success) {
+        // Lấy lại bản ghi mới nhất từ server để chắc chắn đồng bộ DB
+        const refreshed = await apiService.getHoKhauById(editingHoKhau.id);
+        const updated = refreshed.success ? refreshed.data : response.data;
+
+        setHoKhauList((prev) =>
+          prev.map((item) =>
+            item.id === updated.id ? { ...item, ...updated } : item
+          )
+        );
+
+        setSuccess("Cập nhật hộ khẩu thành công!");
+        setShowEditModal(false);
+        setEditingHoKhau(null);
+
+        // Tải lại danh sách để đồng bộ với server
+        await loadHoKhauList();
+      } else {
+        setError(response?.error?.message || "Không thể cập nhật hộ khẩu");
+      }
+    } catch (err: any) {
+      setError(err.error?.message || "Lỗi khi cập nhật hộ khẩu");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -160,6 +368,7 @@ export default function HoKhau() {
       const response = await apiService.createHoKhau({
         soHoKhau: formData.soHoKhau,
         diaChi: formData.diaChi,
+        diaChiDayDu: formData.diaChiDayDu || undefined,
         tinhThanh: formData.tinhThanh || undefined,
         quanHuyen: formData.quanHuyen || undefined,
         phuongXa: formData.phuongXa || undefined,
@@ -175,6 +384,7 @@ export default function HoKhau() {
         setFormData({
           soHoKhau: "",
           diaChi: "",
+          diaChiDayDu: "",
           tinhThanh: "",
           quanHuyen: "",
           phuongXa: "",
@@ -187,53 +397,6 @@ export default function HoKhau() {
       }
     } catch (err: any) {
       setError(err.error?.message || "Lỗi khi tạo hộ khẩu");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleUpdate = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!editingHoKhauId) return;
-    setError(null);
-    setSuccess(null);
-
-    if (!editData.soHoKhau || !editData.diaChi) {
-      setError("Vui lòng điền số hộ khẩu và địa chỉ");
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const response = await apiService.updateHoKhau(editingHoKhauId, {
-        soHoKhau: editData.soHoKhau,
-        diaChi: editData.diaChi,
-        tinhThanh: editData.tinhThanh || undefined,
-        quanHuyen: editData.quanHuyen || undefined,
-        phuongXa: editData.phuongXa || undefined,
-        duongPho: editData.duongPho || undefined,
-        soNha: editData.soNha || undefined,
-        ngayCap: editData.ngayCap || undefined,
-        ghiChu: editData.ghiChu || undefined,
-      });
-
-      if (response.success) {
-        setSuccess("Cập nhật hộ khẩu thành công!");
-        setShowEditForm(false);
-        setEditingHoKhauId(null);
-        setHoKhauList((prev) =>
-          prev.map((item) =>
-            item.id === editingHoKhauId ? response.data : item
-          )
-        );
-        if (viewHoKhau?.id === editingHoKhauId) {
-          setViewHoKhau(response.data);
-        }
-        // đảm bảo đồng bộ nếu có thay đổi phía server
-        loadHoKhauList();
-      }
-    } catch (err: any) {
-      setError(err.error?.message || "Lỗi khi cập nhật hộ khẩu");
     } finally {
       setIsLoading(false);
     }
@@ -253,32 +416,6 @@ export default function HoKhau() {
       </span>
     );
   };
-
-  const relationLabels: Record<string, string> = {
-    chu_ho: "Chủ hộ",
-    vo_chong: "Vợ/Chồng",
-    con: "Con",
-    cha_me: "Cha/Mẹ",
-    anh_chi_em: "Anh/Chị/Em",
-    ong_ba: "Ông/Bà",
-    chau: "Cháu",
-    khac: "Khác",
-  };
-  const relationOptions = [
-    { value: "chu_ho", label: "Chủ hộ" },
-    { value: "vo_chong", label: "Vợ/Chồng" },
-    { value: "con", label: "Con" },
-    { value: "cha_me", label: "Cha/Mẹ" },
-    { value: "anh_chi_em", label: "Anh/Chị/Em" },
-    { value: "ong_ba", label: "Ông/Bà" },
-    { value: "chau", label: "Cháu" },
-    { value: "khac", label: "Khác" },
-  ];
-  const genderOptions = [
-    { value: "nam", label: "Nam" },
-    { value: "nu", label: "Nữ" },
-    { value: "khac", label: "Khác" },
-  ];
 
   return (
     <div className="space-y-6">
@@ -305,242 +442,339 @@ export default function HoKhau() {
         </div>
       )}
 
-      {createPortal(
-        <>
-          {/* View nhân khẩu modal */}
-          {showViewNhanKhau && selectedNhanKhau && (
-            <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-              <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-2xl">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-900">
-                    Thông tin nhân khẩu
-                  </h2>
-                  <button
-                    onClick={closeNhanKhauModals}
-                    className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                    aria-label="Đóng xem nhân khẩu"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div className="space-y-2 text-sm text-gray-700">
-                  <div>
-                    <p className="font-semibold">Họ tên</p>
-                    <p>{selectedNhanKhau.hoTen}</p>
-                  </div>
-                  <div>
-                    <p className="font-semibold">CCCD</p>
-                    <p>{selectedNhanKhau.cccd || "-"}</p>
-                  </div>
-                  <div>
-                    <p className="font-semibold">Quan hệ</p>
-                    <p>
-                      {relationLabels[selectedNhanKhau.quanHe] ||
-                        selectedNhanKhau.quanHe}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-semibold">Giới tính</p>
-                    <p>
-                      {selectedNhanKhau.gioiTinh === "nam"
-                        ? "Nam"
-                        : selectedNhanKhau.gioiTinh === "nu"
-                        ? "Nữ"
-                        : selectedNhanKhau.gioiTinh === "khac"
-                        ? "Khác"
-                        : "-"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-semibold">Ngày sinh</p>
-                    <p>
-                      {selectedNhanKhau.ngaySinh
-                        ? new Date(
-                            selectedNhanKhau.ngaySinh
-                          ).toLocaleDateString("vi-VN")
-                        : "-"}
-                    </p>
-                  </div>
-                </div>
+      {/* Member full view/edit modal */}
+      {showMemberViewModal && viewingNhanKhauDetail && (
+        <div className="fixed inset-0 z-[130] flex min-h-screen w-screen items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto overflow-hidden modal-scroll">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Xem / Sửa nhân khẩu
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Hộ khẩu: {viewingNhanKhauDetail.hoKhauId}
+                </p>
               </div>
+              <button
+                onClick={() => {
+                  setShowMemberViewModal(false);
+                  setViewingNhanKhauDetail(null);
+                  setMemberViewError(null);
+                }}
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                ✕
+              </button>
             </div>
-          )}
 
-          {/* Edit nhân khẩu modal */}
-          {showEditNhanKhau && selectedNhanKhau && (
-            <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-              <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-2xl">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-900">
-                    Chỉnh sửa nhân khẩu
-                  </h2>
-                  <button
-                    onClick={closeNhanKhauModals}
-                    className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                    aria-label="Đóng chỉnh sửa nhân khẩu"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (!selectedNhanKhau) return;
-                    setError(null);
-                    setSuccess(null);
-                    setIsLoading(true);
-                    try {
-                      const response = await apiService.updateNhanKhau(
-                        selectedNhanKhau.id,
-                        {
-                          hoTen: editNhanKhauData.hoTen,
-                          cccd: editNhanKhauData.cccd || undefined,
-                          ngaySinh: editNhanKhauData.ngaySinh || undefined,
-                          gioiTinh:
-                            (editNhanKhauData.gioiTinh as any) || undefined,
-                          quanHe: (editNhanKhauData.quanHe as any) || undefined,
-                        }
-                      );
+            {memberViewError && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {memberViewError}
+              </div>
+            )}
 
-                      if (response.success) {
-                        setSuccess("Cập nhật nhân khẩu thành công!");
-                        setShowEditNhanKhau(false);
-                        setSelectedNhanKhau(response.data);
-                        setNhanKhauTrongHo((prev) =>
-                          prev.map((item) =>
-                            item.id === response.data.id ? response.data : item
-                          )
-                        );
-                      }
-                    } catch (err: any) {
-                      if (err.error?.code === "HOUSEHOLD_HEAD_EXISTS") {
-                        setError(
-                          "Hộ khẩu này đã có chủ hộ, không thể chọn thêm."
-                        );
-                      } else {
-                        setError(
-                          err.error?.message || "Lỗi khi cập nhật nhân khẩu"
-                        );
-                      }
-                    } finally {
-                      setIsLoading(false);
-                    }
-                  }}
-                  className="space-y-3 text-sm"
-                >
+            {memberViewLoading ? (
+              <div className="p-6 text-center text-gray-500">Đang tải...</div>
+            ) : (
+              <form
+                className="space-y-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleUpdateNhanKhauFull();
+                }}
+              >
+                <div className="grid grid-cols-3 gap-4">
                   <label className="block text-sm font-medium text-gray-700">
-                    Họ tên
+                    Họ và tên
                     <input
                       type="text"
-                      required
-                      value={editNhanKhauData.hoTen}
+                      value={memberViewForm.hoTen}
                       onChange={(e) =>
-                        setEditNhanKhauData({
-                          ...editNhanKhauData,
+                        setMemberViewForm({
+                          ...memberViewForm,
                           hoTen: e.target.value,
                         })
                       }
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      required
                     />
                   </label>
-
                   <label className="block text-sm font-medium text-gray-700">
-                    CCCD
+                    CCCD/CMND
                     <input
                       type="text"
-                      value={editNhanKhauData.cccd}
+                      value={memberViewForm.cccd}
                       onChange={(e) =>
-                        setEditNhanKhauData({
-                          ...editNhanKhauData,
+                        setMemberViewForm({
+                          ...memberViewForm,
                           cccd: e.target.value,
                         })
                       }
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     />
                   </label>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="block text-sm font-medium text-gray-700">
-                      Ngày sinh
-                      <input
-                        type="date"
-                        value={editNhanKhauData.ngaySinh}
-                        onChange={(e) =>
-                          setEditNhanKhauData({
-                            ...editNhanKhauData,
-                            ngaySinh: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </label>
-
-                    <label className="block text-sm font-medium text-gray-700">
-                      Giới tính
-                      <select
-                        value={editNhanKhauData.gioiTinh}
-                        onChange={(e) =>
-                          setEditNhanKhauData({
-                            ...editNhanKhauData,
-                            gioiTinh: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                      >
-                        <option value="">Chọn</option>
-                        {genderOptions.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
                   <label className="block text-sm font-medium text-gray-700">
-                    Quan hệ
-                    <select
-                      required
-                      value={editNhanKhauData.quanHe}
+                    Bí danh
+                    <input
+                      type="text"
+                      value={memberViewForm.biDanh}
                       onChange={(e) =>
-                        setEditNhanKhauData({
-                          ...editNhanKhauData,
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          biDanh: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Ngày cấp CCCD
+                    <input
+                      type="date"
+                      value={memberViewForm.ngayCapCCCD || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          ngayCapCCCD: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nơi cấp CCCD
+                    <input
+                      type="text"
+                      value={memberViewForm.noiCapCCCD || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          noiCapCCCD: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Ngày đăng ký thường trú
+                    <input
+                      type="date"
+                      value={memberViewForm.ngayDangKyThuongTru || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          ngayDangKyThuongTru: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Ngày sinh
+                    <input
+                      type="date"
+                      value={memberViewForm.ngaySinh || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          ngaySinh: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Giới tính
+                    <select
+                      value={memberViewForm.gioiTinh || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          gioiTinh: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    >
+                      <option value="">Chọn giới tính</option>
+                      <option value="nam">Nam</option>
+                      <option value="nu">Nữ</option>
+                      <option value="khac">Khác</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nơi sinh
+                    <input
+                      type="text"
+                      value={memberViewForm.noiSinh || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          noiSinh: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nguyên quán
+                    <input
+                      type="text"
+                      value={memberViewForm.nguyenQuan || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          nguyenQuan: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Dân tộc
+                    <input
+                      type="text"
+                      value={memberViewForm.danToc || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          danToc: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Tôn giáo
+                    <input
+                      type="text"
+                      value={memberViewForm.tonGiao || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          tonGiao: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Quốc tịch
+                    <input
+                      type="text"
+                      value={memberViewForm.quocTich || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          quocTich: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Quan hệ với chủ hộ
+                    <select
+                      value={memberViewForm.quanHe || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
                           quanHe: e.target.value,
                         })
                       }
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                       <option value="">Chọn quan hệ</option>
-                      {relationOptions.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
+                      {Object.keys(quanHeLabel).map((key) => (
+                        <option key={key} value={key}>
+                          {quanHeLabel[key]}
                         </option>
                       ))}
                     </select>
                   </label>
+                </div>
 
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      type="submit"
-                      disabled={isLoading}
-                      className="flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50"
-                    >
-                      {isLoading ? "Đang lưu..." : "Lưu"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={closeNhanKhauModals}
-                      className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
-                    >
-                      Hủy
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-        </>,
-        document.body
+                <label className="block text-sm font-medium text-gray-700">
+                  Địa chỉ thường trú trước đây
+                  <textarea
+                    value={memberViewForm.diaChiThuongTruTruoc || ""}
+                    onChange={(e) =>
+                      setMemberViewForm({
+                        ...memberViewForm,
+                        diaChiThuongTruTruoc: e.target.value,
+                      })
+                    }
+                    rows={2}
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nghề nghiệp
+                    <input
+                      type="text"
+                      value={memberViewForm.ngheNghiep || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          ngheNghiep: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nơi làm việc
+                    <input
+                      type="text"
+                      value={memberViewForm.noiLamViec || ""}
+                      onChange={(e) =>
+                        setMemberViewForm({
+                          ...memberViewForm,
+                          noiLamViec: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="submit"
+                    disabled={memberViewSaving}
+                    className="flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50"
+                  >
+                    {memberViewSaving ? "Đang lưu..." : "Lưu thay đổi"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMemberViewModal(false);
+                      setViewingNhanKhauDetail(null);
+                      setMemberViewError(null);
+                    }}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
       )}
       {success && (
         <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-sm text-emerald-700">
@@ -550,7 +784,7 @@ export default function HoKhau() {
 
       {/* Create Form Modal */}
       {showCreateForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[120] flex min-h-screen w-screen items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">
@@ -604,6 +838,19 @@ export default function HoKhau() {
                   }
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   placeholder="Địa chỉ đầy đủ"
+                />
+              </label>
+
+              <label className="block text-sm font-medium text-gray-700">
+                Địa chỉ đầy đủ
+                <textarea
+                  value={formData.diaChiDayDu}
+                  onChange={(e) =>
+                    setFormData({ ...formData, diaChiDayDu: e.target.value })
+                  }
+                  rows={2}
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Nhập địa chỉ đầy đủ nếu cần"
                 />
               </label>
 
@@ -705,152 +952,171 @@ export default function HoKhau() {
         </div>
       )}
 
-      {/* View household modal */}
-      {showViewModal && viewHoKhau && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-3xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl">
+      {/* View Members Modal */}
+      {showViewModal && viewingHoKhau && (
+        <div className="fixed inset-0 z-[120] flex min-h-screen w-screen items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-4xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-gray-900">
-                  Chi tiết hộ khẩu {viewHoKhau.soHoKhau}
+                  Hộ khẩu {viewingHoKhau.soHoKhau}
                 </h2>
-                <p className="text-sm text-gray-600">{viewHoKhau.diaChi}</p>
+                <p className="text-sm text-gray-500">
+                  Địa chỉ: {viewingHoKhau.diaChi}
+                </p>
               </div>
               <button
-                onClick={closeViewModal}
+                onClick={closeViewHousehold}
                 className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                aria-label="Đóng xem hộ khẩu"
               >
                 ✕
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-4 text-sm text-gray-700">
-              <div>
-                <p className="font-semibold">Số hộ khẩu</p>
-                <p>{viewHoKhau.soHoKhau}</p>
+            {viewError && (
+              <div className="mb-3 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                {viewError}
               </div>
-              <div>
-                <p className="font-semibold">Trạng thái</p>
-                <div className="mt-1">
-                  {getTrangThaiBadge(viewHoKhau.trangThai)}
+            )}
+
+            <div className="mb-4 grid grid-cols-2 gap-4 text-sm text-gray-700">
+              <div className="space-y-1">
+                <div className="font-semibold text-gray-900">
+                  Thông tin hộ khẩu
+                </div>
+                <div>Số hộ khẩu: {viewingHoKhau.soHoKhau}</div>
+                <div>Địa chỉ: {viewingHoKhau.diaChi}</div>
+                {viewingHoKhau.diaChiDayDu && (
+                  <div>Địa chỉ đầy đủ: {viewingHoKhau.diaChiDayDu}</div>
+                )}
+                <div>
+                  Trạng thái: {getTrangThaiBadge(viewingHoKhau.trangThai)}
                 </div>
               </div>
-              <div>
-                <p className="font-semibold">Tỉnh/Thành</p>
-                <p>{viewHoKhau.tinhThanh || "-"}</p>
-              </div>
-              <div>
-                <p className="font-semibold">Quận/Huyện</p>
-                <p>{viewHoKhau.quanHuyen || "-"}</p>
-              </div>
-              <div>
-                <p className="font-semibold">Phường/Xã</p>
-                <p>{viewHoKhau.phuongXa || "-"}</p>
-              </div>
-              <div>
-                <p className="font-semibold">Đường/Phố</p>
-                <p>{viewHoKhau.duongPho || "-"}</p>
-              </div>
-              <div>
-                <p className="font-semibold">Số nhà</p>
-                <p>{viewHoKhau.soNha || "-"}</p>
-              </div>
-              <div>
-                <p className="font-semibold">Ngày cấp</p>
-                <p>
-                  {viewHoKhau.ngayCap
-                    ? new Date(viewHoKhau.ngayCap).toLocaleDateString("vi-VN")
-                    : "-"}
-                </p>
-              </div>
-              <div className="col-span-2">
-                <p className="font-semibold">Ghi chú</p>
-                <p>{viewHoKhau.ghiChu || "-"}</p>
+              <div className="space-y-1">
+                <div className="font-semibold text-gray-900">Địa bàn</div>
+                {viewingHoKhau.tinhThanh && (
+                  <div>Tỉnh/Thành: {viewingHoKhau.tinhThanh}</div>
+                )}
+                {viewingHoKhau.quanHuyen && (
+                  <div>Quận/Huyện: {viewingHoKhau.quanHuyen}</div>
+                )}
+                {viewingHoKhau.phuongXa && (
+                  <div>Phường/Xã: {viewingHoKhau.phuongXa}</div>
+                )}
+                {(viewingHoKhau.duongPho || viewingHoKhau.soNha) && (
+                  <div>
+                    Đường/Phố - Số nhà: {viewingHoKhau.duongPho || "-"}{" "}
+                    {viewingHoKhau.soNha || ""}
+                  </div>
+                )}
+                {viewingHoKhau.ngayCap && (
+                  <div>
+                    Ngày cấp:{" "}
+                    {new Date(viewingHoKhau.ngayCap).toLocaleDateString(
+                      "vi-VN"
+                    )}
+                  </div>
+                )}
+                {viewingHoKhau.ghiChu && (
+                  <div>Ghi chú: {viewingHoKhau.ghiChu}</div>
+                )}
               </div>
             </div>
 
-            <div className="rounded-lg border border-gray-200">
-              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-                <h3 className="text-sm font-semibold text-gray-900">
-                  Nhân khẩu trong hộ ({nhanKhauTrongHo.length})
-                </h3>
+            {viewLoading ? (
+              <div className="p-4 text-center text-gray-500">
+                Đang tải nhân khẩu...
               </div>
-              {viewLoading ? (
-                <div className="p-4 text-sm text-gray-600">Đang tải...</div>
-              ) : nhanKhauTrongHo.length === 0 ? (
-                <div className="p-4 text-sm text-gray-600">
-                  Chưa có nhân khẩu nào.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-2 text-left font-semibold text-gray-700">
-                          Họ tên
-                        </th>
-                        <th className="px-4 py-2 text-left font-semibold text-gray-700">
-                          CCCD
-                        </th>
-                        <th className="px-4 py-2 text-left font-semibold text-gray-700">
-                          Quan hệ
-                        </th>
-                        <th className="px-4 py-2 text-left font-semibold text-gray-700">
-                          Thao tác
-                        </th>
+            ) : viewNhanKhau.length === 0 ? (
+              <div className="p-4 text-center text-gray-500">
+                Hộ khẩu này chưa có nhân khẩu nào.
+              </div>
+            ) : (
+              <div className="max-h-[420px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                        Họ tên
+                      </th>
+                      <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                        CCCD
+                      </th>
+                      <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                        Quan hệ
+                      </th>
+                      <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                        Giới tính
+                      </th>
+                      <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                        Ngày sinh
+                      </th>
+                      <th className="px-4 py-2 text-right font-semibold text-gray-700">
+                        Thao tác
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {viewNhanKhau.map((nk) => (
+                      <tr
+                        key={nk.id}
+                        className={
+                          nk.quanHe === "chu_ho" ? "bg-blue-50/40" : ""
+                        }
+                      >
+                        <td className="px-4 py-2 font-medium text-gray-900">
+                          {nk.hoTen}
+                          {nk.quanHe === "chu_ho" && (
+                            <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                              Chủ hộ
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-gray-700">
+                          {nk.cccd || "-"}
+                        </td>
+                        <td className="px-4 py-2 text-gray-700">
+                          {quanHeLabel[nk.quanHe] || nk.quanHe}
+                        </td>
+                        <td className="px-4 py-2 text-gray-700">
+                          {nk.gioiTinh === "nam"
+                            ? "Nam"
+                            : nk.gioiTinh === "nu"
+                            ? "Nữ"
+                            : nk.gioiTinh === "khac"
+                            ? "Khác"
+                            : "-"}
+                        </td>
+                        <td className="px-4 py-2 text-gray-700">
+                          {nk.ngaySinh
+                            ? new Date(nk.ngaySinh).toLocaleDateString("vi-VN")
+                            : "-"}
+                        </td>
+                        <td className="px-4 py-2 text-right text-gray-700">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => openViewNhanKhau(nk.id)}
+                              className="rounded-md border border-gray-200 px-3 py-1 text-xs font-semibold text-gray-700 hover:border-blue-300 hover:text-blue-600"
+                              title="Xem đầy đủ"
+                            >
+                              👁 Xem
+                            </button>
+                          </div>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {[...nhanKhauTrongHo]
-                        .sort((a, b) => {
-                          if (a.quanHe === "chu_ho" && b.quanHe !== "chu_ho")
-                            return -1;
-                          if (b.quanHe === "chu_ho" && a.quanHe !== "chu_ho")
-                            return 1;
-                          return (a.hoTen || "").localeCompare(b.hoTen || "");
-                        })
-                        .map((nk) => (
-                          <tr key={nk.id}>
-                            <td className="px-4 py-2 text-gray-900">
-                              {nk.hoTen}
-                            </td>
-                            <td className="px-4 py-2 text-gray-600">
-                              {nk.cccd || "-"}
-                            </td>
-                            <td className="px-4 py-2 text-gray-600">
-                              {relationLabels[nk.quanHe] || nk.quanHe}
-                            </td>
-                            <td className="px-4 py-2 text-gray-600">
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => openViewNhanKhau(nk)}
-                                  className="rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 shadow-sm"
-                                >
-                                  👁 Xem
-                                </button>
-                                <button
-                                  onClick={() => openEditNhanKhau(nk)}
-                                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-700 hover:bg-blue-100 shadow-sm"
-                                >
-                                  ✏️ Sửa
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Edit household modal */}
-      {showEditForm && editingHoKhauId && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      {/* Edit Modal */}
+      {showEditModal && editingHoKhau && (
+        <div className="fixed inset-0 z-[120] flex min-h-screen w-screen items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">
@@ -858,11 +1124,10 @@ export default function HoKhau() {
               </h2>
               <button
                 onClick={() => {
-                  setShowEditForm(false);
-                  setEditingHoKhauId(null);
+                  setShowEditModal(false);
+                  setEditingHoKhau(null);
                 }}
                 className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                aria-label="Đóng chỉnh sửa"
               >
                 ✕
               </button>
@@ -875,9 +1140,12 @@ export default function HoKhau() {
                   <input
                     type="text"
                     required
-                    value={editData.soHoKhau}
+                    value={editFormData.soHoKhau}
                     onChange={(e) =>
-                      setEditData({ ...editData, soHoKhau: e.target.value })
+                      setEditFormData({
+                        ...editFormData,
+                        soHoKhau: e.target.value,
+                      })
                     }
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -887,9 +1155,12 @@ export default function HoKhau() {
                   Ngày cấp
                   <input
                     type="date"
-                    value={editData.ngayCap}
+                    value={editFormData.ngayCap}
                     onChange={(e) =>
-                      setEditData({ ...editData, ngayCap: e.target.value })
+                      setEditFormData({
+                        ...editFormData,
+                        ngayCap: e.target.value,
+                      })
                     }
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -901,11 +1172,27 @@ export default function HoKhau() {
                 <input
                   type="text"
                   required
-                  value={editData.diaChi}
+                  value={editFormData.diaChi}
                   onChange={(e) =>
-                    setEditData({ ...editData, diaChi: e.target.value })
+                    setEditFormData({ ...editFormData, diaChi: e.target.value })
                   }
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                />
+              </label>
+
+              <label className="block text-sm font-medium text-gray-700">
+                Địa chỉ đầy đủ
+                <textarea
+                  value={editFormData.diaChiDayDu}
+                  onChange={(e) =>
+                    setEditFormData({
+                      ...editFormData,
+                      diaChiDayDu: e.target.value,
+                    })
+                  }
+                  rows={2}
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Nhập địa chỉ đầy đủ nếu cần"
                 />
               </label>
 
@@ -914,9 +1201,12 @@ export default function HoKhau() {
                   Tỉnh/Thành phố
                   <input
                     type="text"
-                    value={editData.tinhThanh}
+                    value={editFormData.tinhThanh}
                     onChange={(e) =>
-                      setEditData({ ...editData, tinhThanh: e.target.value })
+                      setEditFormData({
+                        ...editFormData,
+                        tinhThanh: e.target.value,
+                      })
                     }
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -926,9 +1216,12 @@ export default function HoKhau() {
                   Quận/Huyện
                   <input
                     type="text"
-                    value={editData.quanHuyen}
+                    value={editFormData.quanHuyen}
                     onChange={(e) =>
-                      setEditData({ ...editData, quanHuyen: e.target.value })
+                      setEditFormData({
+                        ...editFormData,
+                        quanHuyen: e.target.value,
+                      })
                     }
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -938,9 +1231,12 @@ export default function HoKhau() {
                   Phường/Xã
                   <input
                     type="text"
-                    value={editData.phuongXa}
+                    value={editFormData.phuongXa}
                     onChange={(e) =>
-                      setEditData({ ...editData, phuongXa: e.target.value })
+                      setEditFormData({
+                        ...editFormData,
+                        phuongXa: e.target.value,
+                      })
                     }
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -952,9 +1248,12 @@ export default function HoKhau() {
                   Đường/Phố
                   <input
                     type="text"
-                    value={editData.duongPho}
+                    value={editFormData.duongPho}
                     onChange={(e) =>
-                      setEditData({ ...editData, duongPho: e.target.value })
+                      setEditFormData({
+                        ...editFormData,
+                        duongPho: e.target.value,
+                      })
                     }
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -964,9 +1263,12 @@ export default function HoKhau() {
                   Số nhà
                   <input
                     type="text"
-                    value={editData.soNha}
+                    value={editFormData.soNha}
                     onChange={(e) =>
-                      setEditData({ ...editData, soNha: e.target.value })
+                      setEditFormData({
+                        ...editFormData,
+                        soNha: e.target.value,
+                      })
                     }
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
@@ -976,13 +1278,12 @@ export default function HoKhau() {
               <label className="block text-sm font-medium text-gray-700">
                 Ghi chú
                 <textarea
-                  value={editData.ghiChu}
+                  value={editFormData.ghiChu}
                   onChange={(e) =>
-                    setEditData({ ...editData, ghiChu: e.target.value })
+                    setEditFormData({ ...editFormData, ghiChu: e.target.value })
                   }
                   rows={3}
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="Ghi chú thêm..."
                 />
               </label>
 
@@ -997,8 +1298,8 @@ export default function HoKhau() {
                 <button
                   type="button"
                   onClick={() => {
-                    setShowEditForm(false);
-                    setEditingHoKhauId(null);
+                    setShowEditModal(false);
+                    setEditingHoKhau(null);
                   }}
                   className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                 >
@@ -1041,7 +1342,7 @@ export default function HoKhau() {
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Ngày tạo
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Thao tác
                   </th>
                 </tr>
@@ -1061,23 +1362,48 @@ export default function HoKhau() {
                     <td className="px-4 py-3 text-sm text-gray-500">
                       {new Date(hk.createdAt).toLocaleDateString("vi-VN")}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => openViewModal(hk)}
-                          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 shadow-sm"
-                          aria-label="Xem nhân khẩu"
+                    <td className="px-4 py-3 text-right space-x-2">
+                      <button
+                        onClick={() => openViewHousehold(hk)}
+                        className="inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600"
+                        title="Xem nhân khẩu"
+                      >
+                        <span className="sr-only">Xem</span>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-4 w-4"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
                         >
-                          👁 Xem
-                        </button>
-                        <button
-                          onClick={() => openEditForm(hk)}
-                          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 shadow-sm"
-                          aria-label="Chỉnh sửa hộ khẩu"
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      </button>
+
+                      <button
+                        onClick={() => openEditHousehold(hk)}
+                        className="inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600"
+                        title="Chỉnh sửa hộ khẩu"
+                      >
+                        <span className="sr-only">Sửa</span>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-4 w-4"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
                         >
-                          ✏️ Sửa
-                        </button>
-                      </div>
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                        </svg>
+                      </button>
                     </td>
                   </tr>
                 ))}

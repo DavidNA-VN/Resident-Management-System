@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS nhan_khau (
     "ngheNghiep" VARCHAR(100),
     "noiLamViec" VARCHAR(200),
 
+    "ghiChu" TEXT,
+
     "trangThai" VARCHAR(20) DEFAULT 'active'
         CHECK ("trangThai" IN ('active', 'tam_vang', 'tam_tru', 'chuyen_di', 'khai_tu', 'deleted')),
 
@@ -135,9 +137,6 @@ CREATE INDEX IF NOT EXISTS idx_nhan_khau_cccd ON nhan_khau(cccd);
 CREATE INDEX IF NOT EXISTS idx_nhan_khau_ho_khau ON nhan_khau("hoKhauId");
 CREATE INDEX IF NOT EXISTS idx_nhan_khau_trang_thai ON nhan_khau("trangThai");
 CREATE INDEX IF NOT EXISTS idx_nhan_khau_user_id ON nhan_khau("userId");
-CREATE UNIQUE INDEX IF NOT EXISTS uq_nhan_khau_chu_ho_moi_ho
-ON nhan_khau("hoKhauId")
-WHERE "quanHe" = 'chu_ho';
 
 -- Add FK for chủ hộ sau khi có nhan_khau
 ALTER TABLE ho_khau

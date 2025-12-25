@@ -11,11 +11,45 @@ interface HoKhau {
 interface NhanKhau {
   id: number;
   hoTen: string;
+  biDanh?: string;
   cccd?: string;
+  ngayCapCCCD?: string;
+  noiCapCCCD?: string;
   ngaySinh?: string;
   gioiTinh?: string;
+  noiSinh?: string;
+  nguyenQuan?: string;
+  danToc?: string;
+  tonGiao?: string;
+  quocTich?: string;
   quanHe: string;
+  ngayDangKyThuongTru?: string;
+  diaChiThuongTruTruoc?: string;
+  ngheNghiep?: string;
+  noiLamViec?: string;
   hoKhauId: number;
+}
+
+interface NhanKhauForm {
+  hoKhauId: string;
+  hoTen: string;
+  biDanh: string;
+  cccd: string;
+  ngayCapCCCD: string;
+  noiCapCCCD: string;
+  ngaySinh: string;
+  gioiTinh: string;
+  noiSinh: string;
+  nguyenQuan: string;
+  danToc: string;
+  tonGiao: string;
+  quocTich: string;
+  quanHe: string;
+  ngayDangKyThuongTru: string;
+  diaChiThuongTruTruoc: string;
+  ngheNghiep: string;
+  noiLamViec: string;
+  ghiChu: string;
 }
 
 export default function NhanKhau() {
@@ -25,17 +59,64 @@ export default function NhanKhau() {
   const [isLoading, setIsLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showActivateModal, setShowActivateModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [viewSaving, setViewSaving] = useState(false);
+  const [viewingNhanKhau, setViewingNhanKhau] = useState<NhanKhau | null>(null);
+  const [toast, setToast] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
-  const [formData, setFormData] = useState({
+  const emptyForm: NhanKhauForm = {
     hoKhauId: "",
     hoTen: "",
+    biDanh: "",
     cccd: "",
+    ngayCapCCCD: "",
+    noiCapCCCD: "",
     ngaySinh: "",
     gioiTinh: "",
+    noiSinh: "",
+    nguyenQuan: "",
+    danToc: "",
+    tonGiao: "",
+    quocTich: "Việt Nam",
     quanHe: "",
-  });
+    ngayDangKyThuongTru: "",
+    diaChiThuongTruTruoc: "",
+    ngheNghiep: "",
+    noiLamViec: "",
+    ghiChu: "",
+  };
+
+  const [formData, setFormData] = useState<NhanKhauForm>({ ...emptyForm });
+  const [viewForm, setViewForm] = useState<NhanKhauForm>({ ...emptyForm });
+
+  const [hoKhauHeadStatus, setHoKhauHeadStatus] = useState<
+    Record<number, boolean>
+  >({});
+  const [checkingHoKhauId, setCheckingHoKhauId] = useState<number | null>(null);
+
+  const showToast = (
+    message: string,
+    type: "success" | "error" = "success"
+  ) => {
+    setToast({ type, message });
+  };
+
+  const normalizeField = (value: string) => {
+    const trimmed = value?.trim?.() ?? "";
+    return trimmed === "" ? null : trimmed;
+  };
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   useEffect(() => {
     loadHoKhauList();
@@ -58,7 +139,9 @@ export default function NhanKhau() {
         }
       }
     } catch (err: any) {
-      setError(err.error?.message || "Lỗi khi tải danh sách hộ khẩu");
+      const message = err.error?.message || "Lỗi khi tải danh sách hộ khẩu";
+      setError(message);
+      showToast(message, "error");
     } finally {
       setIsLoading(false);
     }
@@ -70,73 +153,326 @@ export default function NhanKhau() {
       const response = await apiService.getNhanKhauList(hoKhauId);
       if (response.success) {
         setNhanKhauList(response.data);
+        const hasChuHo = response.data.some(
+          (nk: NhanKhau) => nk.quanHe === "chu_ho"
+        );
+        setHoKhauHeadStatus((prev) => ({ ...prev, [hoKhauId]: hasChuHo }));
       }
     } catch (err: any) {
-      setError(err.error?.message || "Lỗi khi tải danh sách nhân khẩu");
+      const message = err.error?.message || "Lỗi khi tải danh sách nhân khẩu";
+      setError(message);
+      showToast(message, "error");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const ensureHoKhauHasChuHo = async (hoKhauId: number) => {
+    if (hoKhauHeadStatus[hoKhauId] !== undefined) {
+      return hoKhauHeadStatus[hoKhauId];
+    }
+
+    setCheckingHoKhauId(hoKhauId);
+
+    try {
+      const response = await apiService.getNhanKhauList(hoKhauId);
+
+      if (response.success) {
+        const hasChuHo = response.data.some(
+          (nk: NhanKhau) => nk.quanHe === "chu_ho"
+        );
+
+        setHoKhauHeadStatus((prev) => ({ ...prev, [hoKhauId]: hasChuHo }));
+        return hasChuHo;
+      }
+
+      return false;
+    } catch (err) {
+      throw err;
+    } finally {
+      setCheckingHoKhauId((current) => (current === hoKhauId ? null : current));
     }
   };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    setSuccess(null);
+    setToast(null);
 
-    if (!formData.hoKhauId || !formData.hoTen || !formData.quanHe) {
-      setError("Vui lòng điền đầy đủ thông tin bắt buộc");
+    const requiredFields: (keyof NhanKhauForm)[] = [
+      "hoKhauId",
+      "hoTen",
+      "quanHe",
+      "ngaySinh",
+      "gioiTinh",
+      "noiSinh",
+      "nguyenQuan",
+      "danToc",
+      "tonGiao",
+      "quocTich",
+    ];
+
+    const missing = requiredFields.filter((key) => !formData[key]);
+    if (missing.length > 0) {
+      const message =
+        "Vui lòng nhập đầy đủ các trường bắt buộc (Hộ khẩu, Họ tên, Quan hệ, Ngày sinh, Giới tính, Nơi sinh, Nguyên quán, Dân tộc, Tôn giáo, Quốc tịch)";
+      setError(message);
+      showToast(message, "error");
+      return;
+    }
+
+    const optionalKeys: (keyof NhanKhauForm)[] = [
+      "cccd",
+      "ngheNghiep",
+      "noiLamViec",
+      "biDanh",
+      "ngayDangKyThuongTru",
+      "noiCapCCCD",
+      "ngayCapCCCD",
+      "diaChiThuongTruTruoc",
+    ];
+    const hasMissingOptional = optionalKeys.some(
+      (key) => !normalizeField(formData[key])
+    );
+    if (hasMissingOptional && !normalizeField(formData.ghiChu)) {
+      const message =
+        "Vui lòng ghi chú lý do bỏ trống các trường tùy chọn vào phần Ghi chú.";
+      setError(message);
+      showToast(message, "error");
       return;
     }
 
     setIsLoading(true);
     try {
+      const hoKhauIdNumber = Number(formData.hoKhauId);
+
+      if (formData.quanHe === "chu_ho") {
+        const hasChuHo = await ensureHoKhauHasChuHo(hoKhauIdNumber);
+
+        if (hasChuHo) {
+          const message = "Hộ khẩu này đã có chủ hộ, không thể thêm chủ hộ mới";
+          setError(message);
+          showToast(message, "error");
+          return;
+        }
+      }
+
       const response = await apiService.createNhanKhau({
-        hoKhauId: Number(formData.hoKhauId),
-        hoTen: formData.hoTen,
-        cccd: formData.cccd || undefined,
-        ngaySinh: formData.ngaySinh || undefined,
+        hoKhauId: hoKhauIdNumber,
+        hoTen: normalizeField(formData.hoTen)!,
+        biDanh: normalizeField(formData.biDanh) || undefined,
+        cccd: normalizeField(formData.cccd) || undefined,
+        ngayCapCCCD: normalizeField(formData.ngayCapCCCD) || undefined,
+        noiCapCCCD: normalizeField(formData.noiCapCCCD) || undefined,
+        ngaySinh: normalizeField(formData.ngaySinh) || undefined,
         gioiTinh:
-          formData.gioiTinh === "nam" || formData.gioiTinh === "nu"
-            ? (formData.gioiTinh as "nam" | "nu")
-            : undefined,
+          formData.gioiTinh === "nam" ||
+          formData.gioiTinh === "nu" ||
+          formData.gioiTinh === "khac"
+            ? (formData.gioiTinh as "nam" | "nu" | "khac")
+            : null,
+        noiSinh: normalizeField(formData.noiSinh) || undefined,
+        nguyenQuan: normalizeField(formData.nguyenQuan) || undefined,
+        danToc: normalizeField(formData.danToc) || undefined,
+        tonGiao: normalizeField(formData.tonGiao) || undefined,
+        quocTich: normalizeField(formData.quocTich) || undefined,
         quanHe: formData.quanHe as any,
+        ngayDangKyThuongTru:
+          normalizeField(formData.ngayDangKyThuongTru) || undefined,
+        diaChiThuongTruTruoc:
+          normalizeField(formData.diaChiThuongTruTruoc) || undefined,
+        ngheNghiep: normalizeField(formData.ngheNghiep) || undefined,
+        noiLamViec: normalizeField(formData.noiLamViec) || undefined,
+        ghiChu: normalizeField(formData.ghiChu) || undefined,
       });
 
       if (response.success) {
-        setSuccess("Tạo nhân khẩu thành công!");
+        showToast("Thêm nhân khẩu thành công", "success");
         setShowCreateForm(false);
         setFormData({
           hoKhauId: selectedHoKhauId?.toString() || "",
           hoTen: "",
+          biDanh: "",
           cccd: "",
+          ngayCapCCCD: "",
+          noiCapCCCD: "",
           ngaySinh: "",
           gioiTinh: "",
+          noiSinh: "",
+          nguyenQuan: "",
+          danToc: "",
+          tonGiao: "",
+          quocTich: "Việt Nam",
           quanHe: "",
+          ngayDangKyThuongTru: "",
+          diaChiThuongTruTruoc: "",
+          ngheNghiep: "",
+          noiLamViec: "",
+          ghiChu: "",
         });
         if (selectedHoKhauId) {
           loadNhanKhauList(selectedHoKhauId);
         }
       }
     } catch (err: any) {
-      if (err.error?.code === "HOUSEHOLD_HEAD_EXISTS") {
-        setError("Hộ khẩu này đã có chủ hộ, vui lòng chọn quan hệ khác.");
-      } else {
-        setError(err.error?.message || "Lỗi khi tạo nhân khẩu");
-      }
+      const message = err.error?.message || "Lỗi khi tạo nhân khẩu";
+      setError(message);
+      showToast(message, "error");
     } finally {
       setIsLoading(false);
     }
   };
 
+  const openViewNhanKhau = async (id: number) => {
+    setViewError(null);
+    setViewingNhanKhau(null);
+    setShowViewModal(true);
+    setViewLoading(true);
+    try {
+      const res = await apiService.getNhanKhauById(id);
+      if (res.success) {
+        const nk = res.data as any;
+        setViewingNhanKhau(nk);
+        setViewForm({
+          hoKhauId: nk.hoKhauId?.toString() || "",
+          hoTen: nk.hoTen || "",
+          biDanh: nk.biDanh || "",
+          cccd: nk.cccd || "",
+          ngayCapCCCD: nk.ngayCapCCCD ? nk.ngayCapCCCD.substring(0, 10) : "",
+          noiCapCCCD: nk.noiCapCCCD || "",
+          ngaySinh: nk.ngaySinh ? nk.ngaySinh.substring(0, 10) : "",
+          gioiTinh: nk.gioiTinh || "",
+          noiSinh: nk.noiSinh || "",
+          nguyenQuan: nk.nguyenQuan || "",
+          danToc: nk.danToc || "",
+          tonGiao: nk.tonGiao || "",
+          quocTich: nk.quocTich || "Việt Nam",
+          quanHe: nk.quanHe || "",
+          ngayDangKyThuongTru: nk.ngayDangKyThuongTru
+            ? nk.ngayDangKyThuongTru.substring(0, 10)
+            : "",
+          diaChiThuongTruTruoc: nk.diaChiThuongTruTruoc || "",
+          ngheNghiep: nk.ngheNghiep || "",
+          noiLamViec: nk.noiLamViec || "",
+          ghiChu: nk.ghiChu || "",
+        });
+      } else {
+        setViewError(
+          res.error?.message || "Không lấy được thông tin nhân khẩu"
+        );
+      }
+    } catch (err: any) {
+      setViewError(err.error?.message || "Lỗi khi tải thông tin nhân khẩu");
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
+  const handleUpdateNhanKhau = async (id: number) => {
+    setViewError(null);
+    setToast(null);
+    setViewSaving(true);
+    try {
+      const requiredFields: (keyof NhanKhauForm)[] = [
+        "hoTen",
+        "quanHe",
+        "ngaySinh",
+        "gioiTinh",
+        "noiSinh",
+        "nguyenQuan",
+        "danToc",
+        "tonGiao",
+        "quocTich",
+      ];
+      const missingRequired = requiredFields.filter((k) => !viewForm[k]);
+      if (missingRequired.length > 0) {
+        const message =
+          "Vui lòng nhập đầy đủ các trường bắt buộc (Họ tên, Quan hệ, Ngày sinh, Giới tính, Nơi sinh, Nguyên quán, Dân tộc, Tôn giáo, Quốc tịch)";
+        setViewError(message);
+        showToast(message, "error");
+        setViewSaving(false);
+        return;
+      }
+
+      const optionalKeys: (keyof NhanKhauForm)[] = [
+        "cccd",
+        "ngheNghiep",
+        "noiLamViec",
+        "biDanh",
+        "ngayDangKyThuongTru",
+        "noiCapCCCD",
+        "ngayCapCCCD",
+        "diaChiThuongTruTruoc",
+      ];
+      const hasMissingOptional = optionalKeys.some(
+        (k) => !normalizeField(viewForm[k])
+      );
+      if (hasMissingOptional && !normalizeField(viewForm.ghiChu)) {
+        const message =
+          "Vui lòng ghi chú lý do bỏ trống các trường tùy chọn vào phần Ghi chú.";
+        setViewError(message);
+        showToast(message, "error");
+        setViewSaving(false);
+        return;
+      }
+
+      const payload = {
+        hoTen: normalizeField(viewForm.hoTen),
+        biDanh: normalizeField(viewForm.biDanh) || undefined,
+        cccd: normalizeField(viewForm.cccd),
+        ngayCapCCCD: normalizeField(viewForm.ngayCapCCCD),
+        noiCapCCCD: normalizeField(viewForm.noiCapCCCD),
+        ngaySinh: normalizeField(viewForm.ngaySinh),
+        gioiTinh:
+          viewForm.gioiTinh === "nam" ||
+          viewForm.gioiTinh === "nu" ||
+          viewForm.gioiTinh === "khac"
+            ? (viewForm.gioiTinh as "nam" | "nu" | "khac")
+            : null,
+        noiSinh: normalizeField(viewForm.noiSinh),
+        nguyenQuan: normalizeField(viewForm.nguyenQuan),
+        danToc: normalizeField(viewForm.danToc),
+        tonGiao: normalizeField(viewForm.tonGiao),
+        quocTich: normalizeField(viewForm.quocTich),
+        quanHe: normalizeField(viewForm.quanHe) as any,
+        ngayDangKyThuongTru: normalizeField(viewForm.ngayDangKyThuongTru),
+        diaChiThuongTruTruoc: normalizeField(viewForm.diaChiThuongTruTruoc),
+        ngheNghiep: normalizeField(viewForm.ngheNghiep),
+        noiLamViec: normalizeField(viewForm.noiLamViec),
+        ghiChu: normalizeField(viewForm.ghiChu),
+      };
+
+      const res = await apiService.updateNhanKhau(id, payload);
+      if (res.success) {
+        showToast("Cập nhật nhân khẩu thành công!", "success");
+        setShowViewModal(false);
+        setViewingNhanKhau(null);
+        if (selectedHoKhauId) {
+          loadNhanKhauList(selectedHoKhauId);
+        }
+      } else {
+        const message = res.error?.message || "Không thể cập nhật nhân khẩu";
+        setViewError(message);
+        showToast(message, "error");
+      }
+    } catch (err: any) {
+      const message = err.error?.message || "Lỗi khi cập nhật nhân khẩu";
+      setViewError(message);
+      showToast(message, "error");
+    } finally {
+      setViewSaving(false);
+    }
+  };
+
   const handleActivate = async (hoKhauId: number, chuHoId: number) => {
     setError(null);
-    setSuccess(null);
+    setToast(null);
     setIsLoading(true);
 
     try {
       const response = await apiService.activateHoKhau(hoKhauId, chuHoId);
       if (response.success) {
-        setSuccess("Kích hoạt hộ khẩu thành công!");
+        showToast("Kích hoạt hộ khẩu thành công!", "success");
         setShowActivateModal(false);
         loadHoKhauList();
         if (selectedHoKhauId === hoKhauId) {
@@ -144,7 +480,9 @@ export default function NhanKhau() {
         }
       }
     } catch (err: any) {
-      setError(err.error?.message || "Lỗi khi kích hoạt hộ khẩu");
+      const message = err.error?.message || "Lỗi khi kích hoạt hộ khẩu";
+      setError(message);
+      showToast(message, "error");
     } finally {
       setIsLoading(false);
     }
@@ -164,10 +502,60 @@ export default function NhanKhau() {
     { value: "khac", label: "Khác" },
   ];
 
-  const hasChuHoInSelected = nhanKhauList.some((nk) => nk.quanHe === "chu_ho");
+  const selectedFormHoKhauId = formData.hoKhauId
+    ? Number(formData.hoKhauId)
+    : null;
+  const hasChuHoForForm =
+    selectedFormHoKhauId !== null
+      ? hoKhauHeadStatus[selectedFormHoKhauId]
+      : undefined;
+  const isCheckingCurrentHoKhau =
+    selectedFormHoKhauId !== null &&
+    checkingHoKhauId !== null &&
+    checkingHoKhauId === selectedFormHoKhauId;
+
+  useEffect(() => {
+    if (showCreateForm && formData.hoKhauId) {
+      ensureHoKhauHasChuHo(Number(formData.hoKhauId)).catch((err: any) => {
+        const message =
+          err.error?.message || "Lỗi khi kiểm tra thông tin hộ khẩu";
+        setError(message);
+        showToast(message, "error");
+      });
+    }
+  }, [showCreateForm, formData.hoKhauId]);
+
+  useEffect(() => {
+    if (hasChuHoForForm && formData.quanHe === "chu_ho") {
+      setFormData((prev) => ({ ...prev, quanHe: "" }));
+    }
+  }, [hasChuHoForForm, formData.quanHe]);
 
   return (
     <div className="space-y-6">
+      {toast && (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-[200] flex justify-center px-4">
+          <div
+            className={`pointer-events-auto flex items-start gap-3 rounded-lg border px-4 py-3 text-sm shadow-lg ${
+              toast.type === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-red-200 bg-red-50 text-red-800"
+            }`}
+          >
+            <div className="font-semibold">
+              {toast.type === "success" ? "Thành công" : "Thông báo"}
+            </div>
+            <div className="flex-1 text-gray-800">{toast.message}</div>
+            <button
+              onClick={() => setToast(null)}
+              className="ml-2 rounded-full p-1 text-gray-500 hover:bg-black/5 hover:text-gray-700"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -192,15 +580,313 @@ export default function NhanKhau() {
         </button>
       </div>
 
-      {/* Messages */}
-      {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-      {success && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-sm text-emerald-700">
-          {success}
+      {/* View & Edit Modal */}
+      {showViewModal && viewingNhanKhau && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto overflow-hidden modal-scroll">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">
+                  Xem / Sửa nhân khẩu
+                </h2>
+                <p className="text-sm text-gray-500">
+                  Hộ khẩu: {viewForm.hoKhauId}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowViewModal(false);
+                  setViewingNhanKhau(null);
+                  setViewError(null);
+                }}
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            {viewError && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {viewError}
+              </div>
+            )}
+
+            {viewLoading ? (
+              <div className="p-6 text-center text-gray-500">
+                Đang tải thông tin...
+              </div>
+            ) : (
+              <form
+                className="space-y-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (viewingNhanKhau) {
+                    handleUpdateNhanKhau(viewingNhanKhau.id);
+                  }
+                }}
+              >
+                <div className="grid grid-cols-3 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Họ và tên
+                    <input
+                      type="text"
+                      value={viewForm.hoTen}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, hoTen: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      required
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    CCCD/CMND
+                    <input
+                      type="text"
+                      value={viewForm.cccd}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, cccd: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Bí danh
+                    <input
+                      type="text"
+                      value={viewForm.biDanh}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, biDanh: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Ngày cấp CCCD
+                    <input
+                      type="date"
+                      value={viewForm.ngayCapCCCD}
+                      onChange={(e) =>
+                        setViewForm({
+                          ...viewForm,
+                          ngayCapCCCD: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nơi cấp CCCD
+                    <input
+                      type="text"
+                      value={viewForm.noiCapCCCD}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, noiCapCCCD: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Ngày đăng ký thường trú
+                    <input
+                      type="date"
+                      value={viewForm.ngayDangKyThuongTru}
+                      onChange={(e) =>
+                        setViewForm({
+                          ...viewForm,
+                          ngayDangKyThuongTru: e.target.value,
+                        })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Ngày sinh <span className="text-red-500">*</span>
+                    <input
+                      type="date"
+                      value={viewForm.ngaySinh}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, ngaySinh: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Giới tính <span className="text-red-500">*</span>
+                    <select
+                      value={viewForm.gioiTinh}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, gioiTinh: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    >
+                      <option value="">Chọn giới tính</option>
+                      <option value="nam">Nam</option>
+                      <option value="nu">Nữ</option>
+                      <option value="khac">Khác</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nơi sinh <span className="text-red-500">*</span>
+                    <input
+                      type="text"
+                      value={viewForm.noiSinh}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, noiSinh: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nguyên quán <span className="text-red-500">*</span>
+                    <input
+                      type="text"
+                      value={viewForm.nguyenQuan}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, nguyenQuan: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Dân tộc <span className="text-red-500">*</span>
+                    <input
+                      type="text"
+                      value={viewForm.danToc}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, danToc: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Tôn giáo <span className="text-red-500">*</span>
+                    <input
+                      type="text"
+                      value={viewForm.tonGiao}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, tonGiao: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Quốc tịch <span className="text-red-500">*</span>
+                    <input
+                      type="text"
+                      value={viewForm.quocTich}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, quocTich: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Quan hệ với chủ hộ
+                    <select
+                      value={viewForm.quanHe}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, quanHe: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    >
+                      <option value="">Chọn quan hệ</option>
+                      {quanHeOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Địa chỉ thường trú trước đây
+                  <textarea
+                    value={viewForm.diaChiThuongTruTruoc}
+                    onChange={(e) =>
+                      setViewForm({
+                        ...viewForm,
+                        diaChiThuongTruTruoc: e.target.value,
+                      })
+                    }
+                    rows={2}
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nghề nghiệp
+                    <input
+                      type="text"
+                      value={viewForm.ngheNghiep}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, ngheNghiep: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nơi làm việc
+                    <input
+                      type="text"
+                      value={viewForm.noiLamViec}
+                      onChange={(e) =>
+                        setViewForm({ ...viewForm, noiLamViec: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </label>
+                </div>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Ghi chú
+                  <textarea
+                    value={viewForm.ghiChu}
+                    onChange={(e) =>
+                      setViewForm({ ...viewForm, ghiChu: e.target.value })
+                    }
+                    rows={2}
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    placeholder="Nhập lý do nếu bỏ trống các trường tùy chọn"
+                  />
+                </label>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="submit"
+                    disabled={viewSaving}
+                    className="flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50"
+                  >
+                    {viewSaving ? "Đang lưu..." : "Lưu thay đổi"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowViewModal(false);
+                      setViewingNhanKhau(null);
+                      setViewError(null);
+                    }}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
         </div>
       )}
 
@@ -250,8 +936,8 @@ export default function NhanKhau() {
 
       {/* Create Form Modal */}
       {showCreateForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto overflow-hidden modal-scroll">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">
                 Thêm nhân khẩu mới
@@ -284,7 +970,7 @@ export default function NhanKhau() {
                 </select>
               </label>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <label className="block text-sm font-medium text-gray-700">
                   Họ và tên <span className="text-red-500">*</span>
                   <input
@@ -295,6 +981,8 @@ export default function NhanKhau() {
                       setFormData({ ...formData, hoTen: e.target.value })
                     }
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    autoComplete="off"
+                    spellCheck={false}
                   />
                 </label>
 
@@ -309,11 +997,64 @@ export default function NhanKhau() {
                     className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </label>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Bí danh
+                  <input
+                    type="text"
+                    value={formData.biDanh}
+                    onChange={(e) =>
+                      setFormData({ ...formData, biDanh: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <label className="block text-sm font-medium text-gray-700">
-                  Ngày sinh
+                  Ngày cấp CCCD
+                  <input
+                    type="date"
+                    value={formData.ngayCapCCCD}
+                    onChange={(e) =>
+                      setFormData({ ...formData, ngayCapCCCD: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Nơi cấp CCCD
+                  <input
+                    type="text"
+                    value={formData.noiCapCCCD}
+                    onChange={(e) =>
+                      setFormData({ ...formData, noiCapCCCD: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Ngày đăng ký thường trú
+                  <input
+                    type="date"
+                    value={formData.ngayDangKyThuongTru}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        ngayDangKyThuongTru: e.target.value,
+                      })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <label className="block text-sm font-medium text-gray-700">
+                  Ngày sinh <span className="text-red-500">*</span>
                   <input
                     type="date"
                     value={formData.ngaySinh}
@@ -325,7 +1066,7 @@ export default function NhanKhau() {
                 </label>
 
                 <label className="block text-sm font-medium text-gray-700">
-                  Giới tính
+                  Giới tính <span className="text-red-500">*</span>
                   <select
                     value={formData.gioiTinh}
                     onChange={(e) =>
@@ -339,37 +1080,159 @@ export default function NhanKhau() {
                     <option value="khac">Khác</option>
                   </select>
                 </label>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Nơi sinh <span className="text-red-500">*</span>
+                  <input
+                    type="text"
+                    value={formData.noiSinh}
+                    onChange={(e) =>
+                      setFormData({ ...formData, noiSinh: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <label className="block text-sm font-medium text-gray-700">
+                  Nguyên quán <span className="text-red-500">*</span>
+                  <input
+                    type="text"
+                    value={formData.nguyenQuan}
+                    onChange={(e) =>
+                      setFormData({ ...formData, nguyenQuan: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Dân tộc <span className="text-red-500">*</span>
+                  <input
+                    type="text"
+                    value={formData.danToc}
+                    onChange={(e) =>
+                      setFormData({ ...formData, danToc: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Tôn giáo <span className="text-red-500">*</span>
+                  <input
+                    type="text"
+                    value={formData.tonGiao}
+                    onChange={(e) =>
+                      setFormData({ ...formData, tonGiao: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <label className="block text-sm font-medium text-gray-700">
+                  Quốc tịch <span className="text-red-500">*</span>
+                  <input
+                    type="text"
+                    value={formData.quocTich}
+                    onChange={(e) =>
+                      setFormData({ ...formData, quocTich: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Quan hệ với chủ hộ <span className="text-red-500">*</span>
+                  <select
+                    required
+                    value={formData.quanHe}
+                    onChange={(e) =>
+                      setFormData({ ...formData, quanHe: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="">Chọn quan hệ</option>
+                    {quanHeOptions.map((opt) => {
+                      const isChuHoOption = opt.value === "chu_ho";
+                      const disabledChuHo =
+                        isChuHoOption &&
+                        (isCheckingCurrentHoKhau || hasChuHoForForm);
+
+                      return (
+                        <option
+                          key={opt.value}
+                          value={opt.value}
+                          disabled={disabledChuHo}
+                        >
+                          {opt.label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {hasChuHoForForm && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      Hộ khẩu này đã có chủ hộ.
+                    </p>
+                  )}
+                </label>
               </div>
 
               <label className="block text-sm font-medium text-gray-700">
-                Quan hệ với chủ hộ <span className="text-red-500">*</span>
-                <select
-                  required
-                  value={formData.quanHe}
+                Địa chỉ thường trú trước đây
+                <textarea
+                  value={formData.diaChiThuongTruTruoc}
                   onChange={(e) =>
-                    setFormData({ ...formData, quanHe: e.target.value })
+                    setFormData({
+                      ...formData,
+                      diaChiThuongTruTruoc: e.target.value,
+                    })
                   }
+                  rows={2}
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                >
-                  <option value="">Chọn quan hệ</option>
-                  {quanHeOptions.map((opt) => (
-                    <option
-                      key={opt.value}
-                      value={opt.value}
-                      disabled={opt.value === "chu_ho" && hasChuHoInSelected}
-                    >
-                      {opt.label}
-                      {opt.value === "chu_ho" && hasChuHoInSelected
-                        ? " (đã có chủ hộ)"
-                        : ""}
-                    </option>
-                  ))}
-                </select>
-                {hasChuHoInSelected && (
-                  <p className="mt-1 text-xs text-red-600">
-                    Hộ khẩu này đã có chủ hộ, không thể chọn thêm chủ hộ.
-                  </p>
-                )}
+                />
+              </label>
+
+              <div className="grid grid-cols-2 gap-4">
+                <label className="block text-sm font-medium text-gray-700">
+                  Nghề nghiệp
+                  <input
+                    type="text"
+                    value={formData.ngheNghiep}
+                    onChange={(e) =>
+                      setFormData({ ...formData, ngheNghiep: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-gray-700">
+                  Nơi làm việc
+                  <input
+                    type="text"
+                    value={formData.noiLamViec}
+                    onChange={(e) =>
+                      setFormData({ ...formData, noiLamViec: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </label>
+              </div>
+
+              <label className="block text-sm font-medium text-gray-700">
+                Ghi chú
+                <textarea
+                  value={formData.ghiChu}
+                  onChange={(e) =>
+                    setFormData({ ...formData, ghiChu: e.target.value })
+                  }
+                  rows={2}
+                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Nhập lý do nếu bỏ trống các trường tùy chọn"
+                />
               </label>
 
               <div className="flex gap-3 pt-4">
@@ -395,8 +1258,8 @@ export default function NhanKhau() {
 
       {/* Activate Modal */}
       {showActivateModal && selectedHoKhau && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto overflow-hidden modal-scroll">
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">
                 Kích hoạt hộ khẩu
@@ -483,6 +1346,9 @@ export default function NhanKhau() {
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Ngày sinh
                   </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    Thao tác
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -521,6 +1387,15 @@ export default function NhanKhau() {
                       {nk.ngaySinh
                         ? new Date(nk.ngaySinh).toLocaleDateString("vi-VN")
                         : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm text-gray-600 space-x-2">
+                      <button
+                        onClick={() => openViewNhanKhau(nk.id)}
+                        className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-blue-300 hover:text-blue-600"
+                        title="Xem/Sửa"
+                      >
+                        👁 Xem
+                      </button>
                     </td>
                   </tr>
                 ))}

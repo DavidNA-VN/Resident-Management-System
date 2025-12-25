@@ -1,33 +1,62 @@
-import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useState, useEffect } from "react";
-import { createPortal } from "react-dom";
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { useEffect, useState } from "react";
 import { apiService } from "../services/api";
+const quanHeLabel = {
+    chu_ho: "Chủ hộ",
+    vo_chong: "Vợ/Chồng",
+    con: "Con",
+    cha_me: "Cha/Mẹ",
+    anh_chi_em: "Anh/Chị/Em",
+    ong_ba: "Ông/Bà",
+    chau: "Cháu",
+    khac: "Khác",
+};
 export default function HoKhau() {
     const [hoKhauList, setHoKhauList] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [showCreateForm, setShowCreateForm] = useState(false);
+    const [showViewModal, setShowViewModal] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(null);
-    const [showViewModal, setShowViewModal] = useState(false);
-    const [viewHoKhau, setViewHoKhau] = useState(null);
-    const [nhanKhauTrongHo, setNhanKhauTrongHo] = useState([]);
+    const [viewingHoKhau, setViewingHoKhau] = useState(null);
+    const [editingHoKhau, setEditingHoKhau] = useState(null);
+    const [viewNhanKhau, setViewNhanKhau] = useState([]);
     const [viewLoading, setViewLoading] = useState(false);
-    const [showEditForm, setShowEditForm] = useState(false);
-    const [editingHoKhauId, setEditingHoKhauId] = useState(null);
-    const [selectedNhanKhau, setSelectedNhanKhau] = useState(null);
-    const [showViewNhanKhau, setShowViewNhanKhau] = useState(false);
-    const [showEditNhanKhau, setShowEditNhanKhau] = useState(false);
-    const [editNhanKhauData, setEditNhanKhauData] = useState({
+    const [viewError, setViewError] = useState(null);
+    const emptyMemberFull = {
+        id: 0,
         hoTen: "",
+        hoKhauId: undefined,
+        quanHe: "",
+        biDanh: "",
         cccd: "",
+        ngayCapCCCD: "",
+        noiCapCCCD: "",
         ngaySinh: "",
         gioiTinh: "",
-        quanHe: "",
+        noiSinh: "",
+        nguyenQuan: "",
+        danToc: "",
+        tonGiao: "",
+        quocTich: "Việt Nam",
+        ngayDangKyThuongTru: "",
+        diaChiThuongTruTruoc: "",
+        ngheNghiep: "",
+        noiLamViec: "",
+    };
+    const [memberViewForm, setMemberViewForm] = useState({
+        ...emptyMemberFull,
     });
-    // Form state
+    const [viewingNhanKhauDetail, setViewingNhanKhauDetail] = useState(null);
+    const [showMemberViewModal, setShowMemberViewModal] = useState(false);
+    const [memberViewLoading, setMemberViewLoading] = useState(false);
+    const [memberViewSaving, setMemberViewSaving] = useState(false);
+    const [memberViewError, setMemberViewError] = useState(null);
     const [formData, setFormData] = useState({
         soHoKhau: "",
         diaChi: "",
+        diaChiDayDu: "",
         tinhThanh: "",
         quanHuyen: "",
         phuongXa: "",
@@ -36,9 +65,10 @@ export default function HoKhau() {
         ngayCap: "",
         ghiChu: "",
     });
-    const [editData, setEditData] = useState({
+    const [editFormData, setEditFormData] = useState({
         soHoKhau: "",
         diaChi: "",
+        diaChiDayDu: "",
         tinhThanh: "",
         quanHuyen: "",
         phuongXa: "",
@@ -65,62 +95,198 @@ export default function HoKhau() {
             setIsLoading(false);
         }
     };
-    const openViewModal = async (hk) => {
-        setViewHoKhau(hk);
+    const loadMembers = async (hoKhauId) => {
+        const membersRes = await apiService.getNhanKhauList(hoKhauId);
+        if (membersRes.success) {
+            const members = [...membersRes.data];
+            members.sort((a, b) => {
+                if (a.quanHe === "chu_ho" && b.quanHe !== "chu_ho")
+                    return -1;
+                if (a.quanHe !== "chu_ho" && b.quanHe === "chu_ho")
+                    return 1;
+                return a.hoTen.localeCompare(b.hoTen, "vi");
+            });
+            setViewNhanKhau(members);
+        }
+    };
+    const openViewHousehold = async (hoKhau) => {
+        setViewingHoKhau(hoKhau);
         setShowViewModal(true);
         setViewLoading(true);
+        setViewError(null);
         try {
-            const response = await apiService.getNhanKhauList(hk.id);
-            if (response.success) {
-                setNhanKhauTrongHo(response.data);
+            const detailRes = await apiService.getHoKhauById(hoKhau.id);
+            if (detailRes.success) {
+                setViewingHoKhau(detailRes.data);
             }
+            await loadMembers(hoKhau.id);
         }
         catch (err) {
-            setError(err.error?.message || "Lỗi khi tải danh sách nhân khẩu của hộ");
+            setViewError(err.error?.message || "Lỗi khi tải thông tin hộ khẩu");
         }
         finally {
             setViewLoading(false);
         }
     };
-    const openViewNhanKhau = (nk) => {
-        setSelectedNhanKhau(nk);
-        setShowViewNhanKhau(true);
-    };
-    const openEditNhanKhau = (nk) => {
-        setSelectedNhanKhau(nk);
-        setEditNhanKhauData({
-            hoTen: nk.hoTen || "",
-            cccd: nk.cccd || "",
-            ngaySinh: nk.ngaySinh ? nk.ngaySinh.substring(0, 10) : "",
-            gioiTinh: nk.gioiTinh || "",
-            quanHe: nk.quanHe || "",
-        });
-        setShowEditNhanKhau(true);
-    };
-    const closeNhanKhauModals = () => {
-        setShowViewNhanKhau(false);
-        setShowEditNhanKhau(false);
-        setSelectedNhanKhau(null);
-    };
-    const closeViewModal = () => {
+    const closeViewHousehold = () => {
         setShowViewModal(false);
-        setViewHoKhau(null);
-        setNhanKhauTrongHo([]);
+        setViewingHoKhau(null);
+        setViewNhanKhau([]);
+        setViewError(null);
+        setShowMemberViewModal(false);
+        setViewingNhanKhauDetail(null);
+        setMemberViewError(null);
     };
-    const openEditForm = (hk) => {
-        setEditingHoKhauId(hk.id);
-        setEditData({
-            soHoKhau: hk.soHoKhau || "",
-            diaChi: hk.diaChi || "",
-            tinhThanh: hk.tinhThanh || "",
-            quanHuyen: hk.quanHuyen || "",
-            phuongXa: hk.phuongXa || "",
-            duongPho: hk.duongPho || "",
-            soNha: hk.soNha || "",
-            ngayCap: hk.ngayCap ? hk.ngayCap.substring(0, 10) : "",
-            ghiChu: hk.ghiChu || "",
-        });
-        setShowEditForm(true);
+    const openViewNhanKhau = async (id) => {
+        setMemberViewError(null);
+        setMemberViewLoading(true);
+        setShowMemberViewModal(true);
+        try {
+            const res = await apiService.getNhanKhauById(id);
+            if (res.success) {
+                const nk = res.data;
+                setViewingNhanKhauDetail(nk);
+                setMemberViewForm({
+                    ...emptyMemberFull,
+                    ...nk,
+                    hoKhauId: nk.hoKhauId,
+                    ngayCapCCCD: nk.ngayCapCCCD ? nk.ngayCapCCCD.substring(0, 10) : "",
+                    ngayDangKyThuongTru: nk.ngayDangKyThuongTru
+                        ? nk.ngayDangKyThuongTru.substring(0, 10)
+                        : "",
+                    ngaySinh: nk.ngaySinh ? nk.ngaySinh.substring(0, 10) : "",
+                });
+            }
+            else {
+                setMemberViewError(res.error?.message || "Không lấy được thông tin nhân khẩu");
+            }
+        }
+        catch (err) {
+            setMemberViewError(err.error?.message || "Lỗi khi tải thông tin nhân khẩu");
+        }
+        finally {
+            setMemberViewLoading(false);
+        }
+    };
+    const handleUpdateNhanKhauFull = async () => {
+        if (!viewingNhanKhauDetail)
+            return;
+        setMemberViewError(null);
+        setMemberViewSaving(true);
+        try {
+            const payload = {
+                hoTen: memberViewForm.hoTen || undefined,
+                biDanh: memberViewForm.biDanh || undefined,
+                cccd: memberViewForm.cccd || undefined,
+                ngayCapCCCD: memberViewForm.ngayCapCCCD || undefined,
+                noiCapCCCD: memberViewForm.noiCapCCCD || undefined,
+                ngaySinh: memberViewForm.ngaySinh || undefined,
+                gioiTinh: memberViewForm.gioiTinh === "nam" ||
+                    memberViewForm.gioiTinh === "nu" ||
+                    memberViewForm.gioiTinh === "khac"
+                    ? memberViewForm.gioiTinh
+                    : undefined,
+                noiSinh: memberViewForm.noiSinh || undefined,
+                nguyenQuan: memberViewForm.nguyenQuan || undefined,
+                danToc: memberViewForm.danToc || undefined,
+                tonGiao: memberViewForm.tonGiao || undefined,
+                quocTich: memberViewForm.quocTich || undefined,
+                quanHe: (memberViewForm.quanHe || undefined),
+                ngayDangKyThuongTru: memberViewForm.ngayDangKyThuongTru || undefined,
+                diaChiThuongTruTruoc: memberViewForm.diaChiThuongTruTruoc || undefined,
+                ngheNghiep: memberViewForm.ngheNghiep || undefined,
+                noiLamViec: memberViewForm.noiLamViec || undefined,
+            };
+            const res = await apiService.updateNhanKhau(viewingNhanKhauDetail.id, payload);
+            if (res.success) {
+                if (viewingHoKhau)
+                    await loadMembers(viewingHoKhau.id);
+                setShowMemberViewModal(false);
+                setViewingNhanKhauDetail(null);
+            }
+            else {
+                setMemberViewError(res.error?.message || "Không thể cập nhật nhân khẩu");
+            }
+        }
+        catch (err) {
+            setMemberViewError(err.error?.message || "Lỗi khi cập nhật nhân khẩu");
+        }
+        finally {
+            setMemberViewSaving(false);
+        }
+    };
+    const openEditHousehold = async (hoKhau) => {
+        setEditingHoKhau(hoKhau);
+        setShowEditModal(true);
+        setError(null);
+        try {
+            const response = await apiService.getHoKhauById(hoKhau.id);
+            if (response.success) {
+                const data = response.data;
+                setEditFormData({
+                    soHoKhau: data.soHoKhau || "",
+                    diaChi: data.diaChi || "",
+                    diaChiDayDu: data.diaChiDayDu || "",
+                    tinhThanh: data.tinhThanh || "",
+                    quanHuyen: data.quanHuyen || "",
+                    phuongXa: data.phuongXa || "",
+                    duongPho: data.duongPho || "",
+                    soNha: data.soNha || "",
+                    ngayCap: data.ngayCap ? data.ngayCap.substring(0, 10) : "",
+                    ghiChu: data.ghiChu || "",
+                });
+            }
+        }
+        catch (err) {
+            setError(err.error?.message || "Lỗi khi tải thông tin hộ khẩu");
+        }
+    };
+    const handleUpdate = async (e) => {
+        e.preventDefault();
+        if (!editingHoKhau)
+            return;
+        if (!editFormData.soHoKhau || !editFormData.diaChi) {
+            setError("Vui lòng điền số hộ khẩu và địa chỉ");
+            return;
+        }
+        setIsLoading(true);
+        setError(null);
+        setSuccess(null);
+        try {
+            const payload = {
+                soHoKhau: editFormData.soHoKhau,
+                diaChi: editFormData.diaChi,
+                diaChiDayDu: editFormData.diaChiDayDu || undefined,
+                tinhThanh: editFormData.tinhThanh || undefined,
+                quanHuyen: editFormData.quanHuyen || undefined,
+                phuongXa: editFormData.phuongXa || undefined,
+                duongPho: editFormData.duongPho || undefined,
+                soNha: editFormData.soNha || undefined,
+                ngayCap: editFormData.ngayCap || undefined,
+                ghiChu: editFormData.ghiChu || undefined,
+            };
+            const response = await apiService.updateHoKhau(editingHoKhau.id, payload);
+            if (response.success) {
+                // Lấy lại bản ghi mới nhất từ server để chắc chắn đồng bộ DB
+                const refreshed = await apiService.getHoKhauById(editingHoKhau.id);
+                const updated = refreshed.success ? refreshed.data : response.data;
+                setHoKhauList((prev) => prev.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+                setSuccess("Cập nhật hộ khẩu thành công!");
+                setShowEditModal(false);
+                setEditingHoKhau(null);
+                // Tải lại danh sách để đồng bộ với server
+                await loadHoKhauList();
+            }
+            else {
+                setError(response?.error?.message || "Không thể cập nhật hộ khẩu");
+            }
+        }
+        catch (err) {
+            setError(err.error?.message || "Lỗi khi cập nhật hộ khẩu");
+        }
+        finally {
+            setIsLoading(false);
+        }
     };
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -135,6 +301,7 @@ export default function HoKhau() {
             const response = await apiService.createHoKhau({
                 soHoKhau: formData.soHoKhau,
                 diaChi: formData.diaChi,
+                diaChiDayDu: formData.diaChiDayDu || undefined,
                 tinhThanh: formData.tinhThanh || undefined,
                 quanHuyen: formData.quanHuyen || undefined,
                 phuongXa: formData.phuongXa || undefined,
@@ -149,6 +316,7 @@ export default function HoKhau() {
                 setFormData({
                     soHoKhau: "",
                     diaChi: "",
+                    diaChiDayDu: "",
                     tinhThanh: "",
                     quanHuyen: "",
                     phuongXa: "",
@@ -167,151 +335,111 @@ export default function HoKhau() {
             setIsLoading(false);
         }
     };
-    const handleUpdate = async (e) => {
-        e.preventDefault();
-        if (!editingHoKhauId)
-            return;
-        setError(null);
-        setSuccess(null);
-        if (!editData.soHoKhau || !editData.diaChi) {
-            setError("Vui lòng điền số hộ khẩu và địa chỉ");
-            return;
-        }
-        setIsLoading(true);
-        try {
-            const response = await apiService.updateHoKhau(editingHoKhauId, {
-                soHoKhau: editData.soHoKhau,
-                diaChi: editData.diaChi,
-                tinhThanh: editData.tinhThanh || undefined,
-                quanHuyen: editData.quanHuyen || undefined,
-                phuongXa: editData.phuongXa || undefined,
-                duongPho: editData.duongPho || undefined,
-                soNha: editData.soNha || undefined,
-                ngayCap: editData.ngayCap || undefined,
-                ghiChu: editData.ghiChu || undefined,
-            });
-            if (response.success) {
-                setSuccess("Cập nhật hộ khẩu thành công!");
-                setShowEditForm(false);
-                setEditingHoKhauId(null);
-                setHoKhauList((prev) => prev.map((item) => item.id === editingHoKhauId ? response.data : item));
-                if (viewHoKhau?.id === editingHoKhauId) {
-                    setViewHoKhau(response.data);
-                }
-                // đảm bảo đồng bộ nếu có thay đổi phía server
-                loadHoKhauList();
-            }
-        }
-        catch (err) {
-            setError(err.error?.message || "Lỗi khi cập nhật hộ khẩu");
-        }
-        finally {
-            setIsLoading(false);
-        }
-    };
     const getTrangThaiBadge = (trangThai) => {
         if (trangThai === "active") {
             return (_jsx("span", { className: "rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700", children: "\u0110\u00E3 k\u00EDch ho\u1EA1t" }));
         }
         return (_jsx("span", { className: "rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700", children: "Ch\u01B0a k\u00EDch ho\u1EA1t" }));
     };
-    const relationLabels = {
-        chu_ho: "Chủ hộ",
-        vo_chong: "Vợ/Chồng",
-        con: "Con",
-        cha_me: "Cha/Mẹ",
-        anh_chi_em: "Anh/Chị/Em",
-        ong_ba: "Ông/Bà",
-        chau: "Cháu",
-        khac: "Khác",
-    };
-    const relationOptions = [
-        { value: "chu_ho", label: "Chủ hộ" },
-        { value: "vo_chong", label: "Vợ/Chồng" },
-        { value: "con", label: "Con" },
-        { value: "cha_me", label: "Cha/Mẹ" },
-        { value: "anh_chi_em", label: "Anh/Chị/Em" },
-        { value: "ong_ba", label: "Ông/Bà" },
-        { value: "chau", label: "Cháu" },
-        { value: "khac", label: "Khác" },
-    ];
-    const genderOptions = [
-        { value: "nam", label: "Nam" },
-        { value: "nu", label: "Nữ" },
-        { value: "khac", label: "Khác" },
-    ];
-    return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { className: "flex items-center justify-between", children: [_jsxs("div", { children: [_jsx("h1", { className: "text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent", children: "Qu\u1EA3n l\u00FD H\u1ED9 kh\u1EA9u" }), _jsx("p", { className: "mt-1 text-gray-600", children: "T\u1EA1o v\u00E0 qu\u1EA3n l\u00FD th\u00F4ng tin h\u1ED9 kh\u1EA9u" })] }), _jsx("button", { onClick: () => setShowCreateForm(true), className: "rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg hover:-translate-y-0.5", children: "+ T\u1EA1o h\u1ED9 kh\u1EA9u m\u1EDBi" })] }), error && (_jsx("div", { className: "rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700", children: error })), createPortal(_jsxs(_Fragment, { children: [showViewNhanKhau && selectedNhanKhau && (_jsx("div", { className: "fixed inset-0 z-[1200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4", children: _jsxs("div", { className: "w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-2xl", children: [_jsxs("div", { className: "mb-4 flex items-center justify-between", children: [_jsx("h2", { className: "text-xl font-bold text-gray-900", children: "Th\u00F4ng tin nh\u00E2n kh\u1EA9u" }), _jsx("button", { onClick: closeNhanKhauModals, className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600", "aria-label": "\u0110\u00F3ng xem nh\u00E2n kh\u1EA9u", children: "\u2715" })] }), _jsxs("div", { className: "space-y-2 text-sm text-gray-700", children: [_jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "H\u1ECD t\u00EAn" }), _jsx("p", { children: selectedNhanKhau.hoTen })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "CCCD" }), _jsx("p", { children: selectedNhanKhau.cccd || "-" })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "Quan h\u1EC7" }), _jsx("p", { children: relationLabels[selectedNhanKhau.quanHe] ||
-                                                        selectedNhanKhau.quanHe })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "Gi\u1EDBi t\u00EDnh" }), _jsx("p", { children: selectedNhanKhau.gioiTinh === "nam"
-                                                        ? "Nam"
-                                                        : selectedNhanKhau.gioiTinh === "nu"
-                                                            ? "Nữ"
-                                                            : selectedNhanKhau.gioiTinh === "khac"
-                                                                ? "Khác"
-                                                                : "-" })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "Ng\u00E0y sinh" }), _jsx("p", { children: selectedNhanKhau.ngaySinh
-                                                        ? new Date(selectedNhanKhau.ngaySinh).toLocaleDateString("vi-VN")
-                                                        : "-" })] })] })] }) })), showEditNhanKhau && selectedNhanKhau && (_jsx("div", { className: "fixed inset-0 z-[1200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4", children: _jsxs("div", { className: "w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-2xl", children: [_jsxs("div", { className: "mb-4 flex items-center justify-between", children: [_jsx("h2", { className: "text-xl font-bold text-gray-900", children: "Ch\u1EC9nh s\u1EEDa nh\u00E2n kh\u1EA9u" }), _jsx("button", { onClick: closeNhanKhauModals, className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600", "aria-label": "\u0110\u00F3ng ch\u1EC9nh s\u1EEDa nh\u00E2n kh\u1EA9u", children: "\u2715" })] }), _jsxs("form", { onSubmit: async (e) => {
-                                        e.preventDefault();
-                                        if (!selectedNhanKhau)
-                                            return;
-                                        setError(null);
-                                        setSuccess(null);
-                                        setIsLoading(true);
-                                        try {
-                                            const response = await apiService.updateNhanKhau(selectedNhanKhau.id, {
-                                                hoTen: editNhanKhauData.hoTen,
-                                                cccd: editNhanKhauData.cccd || undefined,
-                                                ngaySinh: editNhanKhauData.ngaySinh || undefined,
-                                                gioiTinh: editNhanKhauData.gioiTinh || undefined,
-                                                quanHe: editNhanKhauData.quanHe || undefined,
-                                            });
-                                            if (response.success) {
-                                                setSuccess("Cập nhật nhân khẩu thành công!");
-                                                setShowEditNhanKhau(false);
-                                                setSelectedNhanKhau(response.data);
-                                                setNhanKhauTrongHo((prev) => prev.map((item) => item.id === response.data.id ? response.data : item));
-                                            }
-                                        }
-                                        catch (err) {
-                                            if (err.error?.code === "HOUSEHOLD_HEAD_EXISTS") {
-                                                setError("Hộ khẩu này đã có chủ hộ, không thể chọn thêm.");
-                                            }
-                                            else {
-                                                setError(err.error?.message || "Lỗi khi cập nhật nhân khẩu");
-                                            }
-                                        }
-                                        finally {
-                                            setIsLoading(false);
-                                        }
-                                    }, className: "space-y-3 text-sm", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["H\u1ECD t\u00EAn", _jsx("input", { type: "text", required: true, value: editNhanKhauData.hoTen, onChange: (e) => setEditNhanKhauData({
-                                                        ...editNhanKhauData,
+    return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { className: "flex items-center justify-between", children: [_jsxs("div", { children: [_jsx("h1", { className: "text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent", children: "Qu\u1EA3n l\u00FD H\u1ED9 kh\u1EA9u" }), _jsx("p", { className: "mt-1 text-gray-600", children: "T\u1EA1o v\u00E0 qu\u1EA3n l\u00FD th\u00F4ng tin h\u1ED9 kh\u1EA9u" })] }), _jsx("button", { onClick: () => setShowCreateForm(true), className: "rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-6 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg hover:-translate-y-0.5", children: "+ T\u1EA1o h\u1ED9 kh\u1EA9u m\u1EDBi" })] }), error && (_jsx("div", { className: "rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700", children: error })), showMemberViewModal && viewingNhanKhauDetail && (_jsx("div", { className: "fixed inset-0 z-[130] flex min-h-screen w-screen items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto", children: _jsxs("div", { className: "w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto overflow-hidden modal-scroll", children: [_jsxs("div", { className: "mb-4 flex items-center justify-between", children: [_jsxs("div", { children: [_jsx("h3", { className: "text-lg font-semibold text-gray-900", children: "Xem / S\u1EEDa nh\u00E2n kh\u1EA9u" }), _jsxs("p", { className: "text-sm text-gray-500", children: ["H\u1ED9 kh\u1EA9u: ", viewingNhanKhauDetail.hoKhauId] })] }), _jsx("button", { onClick: () => {
+                                        setShowMemberViewModal(false);
+                                        setViewingNhanKhauDetail(null);
+                                        setMemberViewError(null);
+                                    }, className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600", children: "\u2715" })] }), memberViewError && (_jsx("div", { className: "mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700", children: memberViewError })), memberViewLoading ? (_jsx("div", { className: "p-6 text-center text-gray-500", children: "\u0110ang t\u1EA3i..." })) : (_jsxs("form", { className: "space-y-4", onSubmit: (e) => {
+                                e.preventDefault();
+                                handleUpdateNhanKhauFull();
+                            }, children: [_jsxs("div", { className: "grid grid-cols-3 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["H\u1ECD v\u00E0 t\u00EAn", _jsx("input", { type: "text", value: memberViewForm.hoTen, onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
                                                         hoTen: e.target.value,
-                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["CCCD", _jsx("input", { type: "text", value: editNhanKhauData.cccd, onChange: (e) => setEditNhanKhauData({
-                                                        ...editNhanKhauData,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", required: true })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["CCCD/CMND", _jsx("input", { type: "text", value: memberViewForm.cccd, onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
                                                         cccd: e.target.value,
-                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("div", { className: "grid grid-cols-2 gap-3", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ng\u00E0y sinh", _jsx("input", { type: "date", value: editNhanKhauData.ngaySinh, onChange: (e) => setEditNhanKhauData({
-                                                                ...editNhanKhauData,
-                                                                ngaySinh: e.target.value,
-                                                            }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Gi\u1EDBi t\u00EDnh", _jsxs("select", { value: editNhanKhauData.gioiTinh, onChange: (e) => setEditNhanKhauData({
-                                                                ...editNhanKhauData,
-                                                                gioiTinh: e.target.value,
-                                                            }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", children: [_jsx("option", { value: "", children: "Ch\u1ECDn" }), genderOptions.map((opt) => (_jsx("option", { value: opt.value, children: opt.label }, opt.value)))] })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Quan h\u1EC7", _jsxs("select", { required: true, value: editNhanKhauData.quanHe, onChange: (e) => setEditNhanKhauData({
-                                                        ...editNhanKhauData,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["B\u00ED danh", _jsx("input", { type: "text", value: memberViewForm.biDanh, onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        biDanh: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("div", { className: "grid grid-cols-3 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ng\u00E0y c\u1EA5p CCCD", _jsx("input", { type: "date", value: memberViewForm.ngayCapCCCD || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        ngayCapCCCD: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["N\u01A1i c\u1EA5p CCCD", _jsx("input", { type: "text", value: memberViewForm.noiCapCCCD || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        noiCapCCCD: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ng\u00E0y \u0111\u0103ng k\u00FD th\u01B0\u1EDDng tr\u00FA", _jsx("input", { type: "date", value: memberViewForm.ngayDangKyThuongTru || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        ngayDangKyThuongTru: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("div", { className: "grid grid-cols-3 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ng\u00E0y sinh", _jsx("input", { type: "date", value: memberViewForm.ngaySinh || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        ngaySinh: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Gi\u1EDBi t\u00EDnh", _jsxs("select", { value: memberViewForm.gioiTinh || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        gioiTinh: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", children: [_jsx("option", { value: "", children: "Ch\u1ECDn gi\u1EDBi t\u00EDnh" }), _jsx("option", { value: "nam", children: "Nam" }), _jsx("option", { value: "nu", children: "N\u1EEF" }), _jsx("option", { value: "khac", children: "Kh\u00E1c" })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["N\u01A1i sinh", _jsx("input", { type: "text", value: memberViewForm.noiSinh || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        noiSinh: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("div", { className: "grid grid-cols-3 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Nguy\u00EAn qu\u00E1n", _jsx("input", { type: "text", value: memberViewForm.nguyenQuan || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        nguyenQuan: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["D\u00E2n t\u1ED9c", _jsx("input", { type: "text", value: memberViewForm.danToc || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        danToc: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["T\u00F4n gi\u00E1o", _jsx("input", { type: "text", value: memberViewForm.tonGiao || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        tonGiao: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Qu\u1ED1c t\u1ECBch", _jsx("input", { type: "text", value: memberViewForm.quocTich || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        quocTich: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Quan h\u1EC7 v\u1EDBi ch\u1EE7 h\u1ED9", _jsxs("select", { value: memberViewForm.quanHe || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
                                                         quanHe: e.target.value,
-                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", children: [_jsx("option", { value: "", children: "Ch\u1ECDn quan h\u1EC7" }), relationOptions.map((opt) => (_jsx("option", { value: opt.value, children: opt.label }, opt.value)))] })] }), _jsxs("div", { className: "flex gap-2 pt-2", children: [_jsx("button", { type: "submit", disabled: isLoading, className: "flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50", children: isLoading ? "Đang lưu..." : "Lưu" }), _jsx("button", { type: "button", onClick: closeNhanKhauModals, className: "rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50", children: "H\u1EE7y" })] })] })] }) }))] }), document.body), success && (_jsx("div", { className: "rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-sm text-emerald-700", children: success })), showCreateForm && (_jsx("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4", children: _jsxs("div", { className: "w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl", children: [_jsxs("div", { className: "mb-6 flex items-center justify-between", children: [_jsx("h2", { className: "text-xl font-bold text-gray-900", children: "T\u1EA1o h\u1ED9 kh\u1EA9u m\u1EDBi" }), _jsx("button", { onClick: () => setShowCreateForm(false), className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600", children: "\u2715" })] }), _jsxs("form", { onSubmit: handleSubmit, className: "space-y-4", children: [_jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["S\u1ED1 h\u1ED9 kh\u1EA9u ", _jsx("span", { className: "text-red-500", children: "*" }), _jsx("input", { type: "text", required: true, value: formData.soHoKhau, onChange: (e) => setFormData({ ...formData, soHoKhau: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", placeholder: "VD: HK001" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ng\u00E0y c\u1EA5p", _jsx("input", { type: "date", value: formData.ngayCap, onChange: (e) => setFormData({ ...formData, ngayCap: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u1ECBa ch\u1EC9 ", _jsx("span", { className: "text-red-500", children: "*" }), _jsx("input", { type: "text", required: true, value: formData.diaChi, onChange: (e) => setFormData({ ...formData, diaChi: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", placeholder: "\u0110\u1ECBa ch\u1EC9 \u0111\u1EA7y \u0111\u1EE7" })] }), _jsxs("div", { className: "grid grid-cols-3 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["T\u1EC9nh/Th\u00E0nh ph\u1ED1", _jsx("input", { type: "text", value: formData.tinhThanh, onChange: (e) => setFormData({ ...formData, tinhThanh: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Qu\u1EADn/Huy\u1EC7n", _jsx("input", { type: "text", value: formData.quanHuyen, onChange: (e) => setFormData({ ...formData, quanHuyen: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ph\u01B0\u1EDDng/X\u00E3", _jsx("input", { type: "text", value: formData.phuongXa, onChange: (e) => setFormData({ ...formData, phuongXa: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u01B0\u1EDDng/Ph\u1ED1", _jsx("input", { type: "text", value: formData.duongPho, onChange: (e) => setFormData({ ...formData, duongPho: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["S\u1ED1 nh\u00E0", _jsx("input", { type: "text", value: formData.soNha, onChange: (e) => setFormData({ ...formData, soNha: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ghi ch\u00FA", _jsx("textarea", { value: formData.ghiChu, onChange: (e) => setFormData({ ...formData, ghiChu: e.target.value }), rows: 3, className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", placeholder: "Ghi ch\u00FA th\u00EAm..." })] }), _jsxs("div", { className: "flex gap-3 pt-4", children: [_jsx("button", { type: "submit", disabled: isLoading, className: "flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50", children: isLoading ? "Đang tạo..." : "Tạo hộ khẩu" }), _jsx("button", { type: "button", onClick: () => setShowCreateForm(false), className: "rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50", children: "H\u1EE7y" })] })] })] }) })), showViewModal && viewHoKhau && (_jsx("div", { className: "fixed inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4", children: _jsxs("div", { className: "w-full max-w-3xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl", children: [_jsxs("div", { className: "mb-4 flex items-center justify-between", children: [_jsxs("div", { children: [_jsxs("h2", { className: "text-xl font-bold text-gray-900", children: ["Chi ti\u1EBFt h\u1ED9 kh\u1EA9u ", viewHoKhau.soHoKhau] }), _jsx("p", { className: "text-sm text-gray-600", children: viewHoKhau.diaChi })] }), _jsx("button", { onClick: closeViewModal, className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600", "aria-label": "\u0110\u00F3ng xem h\u1ED9 kh\u1EA9u", children: "\u2715" })] }), _jsxs("div", { className: "grid grid-cols-2 gap-4 mb-4 text-sm text-gray-700", children: [_jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "S\u1ED1 h\u1ED9 kh\u1EA9u" }), _jsx("p", { children: viewHoKhau.soHoKhau })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "Tr\u1EA1ng th\u00E1i" }), _jsx("div", { className: "mt-1", children: getTrangThaiBadge(viewHoKhau.trangThai) })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "T\u1EC9nh/Th\u00E0nh" }), _jsx("p", { children: viewHoKhau.tinhThanh || "-" })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "Qu\u1EADn/Huy\u1EC7n" }), _jsx("p", { children: viewHoKhau.quanHuyen || "-" })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "Ph\u01B0\u1EDDng/X\u00E3" }), _jsx("p", { children: viewHoKhau.phuongXa || "-" })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "\u0110\u01B0\u1EDDng/Ph\u1ED1" }), _jsx("p", { children: viewHoKhau.duongPho || "-" })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "S\u1ED1 nh\u00E0" }), _jsx("p", { children: viewHoKhau.soNha || "-" })] }), _jsxs("div", { children: [_jsx("p", { className: "font-semibold", children: "Ng\u00E0y c\u1EA5p" }), _jsx("p", { children: viewHoKhau.ngayCap
-                                                ? new Date(viewHoKhau.ngayCap).toLocaleDateString("vi-VN")
-                                                : "-" })] }), _jsxs("div", { className: "col-span-2", children: [_jsx("p", { className: "font-semibold", children: "Ghi ch\u00FA" }), _jsx("p", { children: viewHoKhau.ghiChu || "-" })] })] }), _jsxs("div", { className: "rounded-lg border border-gray-200", children: [_jsx("div", { className: "flex items-center justify-between border-b border-gray-200 px-4 py-3", children: _jsxs("h3", { className: "text-sm font-semibold text-gray-900", children: ["Nh\u00E2n kh\u1EA9u trong h\u1ED9 (", nhanKhauTrongHo.length, ")"] }) }), viewLoading ? (_jsx("div", { className: "p-4 text-sm text-gray-600", children: "\u0110ang t\u1EA3i..." })) : nhanKhauTrongHo.length === 0 ? (_jsx("div", { className: "p-4 text-sm text-gray-600", children: "Ch\u01B0a c\u00F3 nh\u00E2n kh\u1EA9u n\u00E0o." })) : (_jsx("div", { className: "overflow-x-auto", children: _jsxs("table", { className: "w-full text-sm", children: [_jsx("thead", { className: "bg-gray-50", children: _jsxs("tr", { children: [_jsx("th", { className: "px-4 py-2 text-left font-semibold text-gray-700", children: "H\u1ECD t\u00EAn" }), _jsx("th", { className: "px-4 py-2 text-left font-semibold text-gray-700", children: "CCCD" }), _jsx("th", { className: "px-4 py-2 text-left font-semibold text-gray-700", children: "Quan h\u1EC7" }), _jsx("th", { className: "px-4 py-2 text-left font-semibold text-gray-700", children: "Thao t\u00E1c" })] }) }), _jsx("tbody", { className: "divide-y divide-gray-200", children: [...nhanKhauTrongHo]
-                                                    .sort((a, b) => {
-                                                    if (a.quanHe === "chu_ho" && b.quanHe !== "chu_ho")
-                                                        return -1;
-                                                    if (b.quanHe === "chu_ho" && a.quanHe !== "chu_ho")
-                                                        return 1;
-                                                    return (a.hoTen || "").localeCompare(b.hoTen || "");
-                                                })
-                                                    .map((nk) => (_jsxs("tr", { children: [_jsx("td", { className: "px-4 py-2 text-gray-900", children: nk.hoTen }), _jsx("td", { className: "px-4 py-2 text-gray-600", children: nk.cccd || "-" }), _jsx("td", { className: "px-4 py-2 text-gray-600", children: relationLabels[nk.quanHe] || nk.quanHe }), _jsx("td", { className: "px-4 py-2 text-gray-600", children: _jsxs("div", { className: "flex items-center gap-2", children: [_jsx("button", { onClick: () => openViewNhanKhau(nk), className: "rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 shadow-sm", children: "\uD83D\uDC41 Xem" }), _jsx("button", { onClick: () => openEditNhanKhau(nk), className: "rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-700 hover:bg-blue-100 shadow-sm", children: "\u270F\uFE0F S\u1EEDa" })] }) })] }, nk.id))) })] }) }))] })] }) })), showEditForm && editingHoKhauId && (_jsx("div", { className: "fixed inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4", children: _jsxs("div", { className: "w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl", children: [_jsxs("div", { className: "mb-6 flex items-center justify-between", children: [_jsx("h2", { className: "text-xl font-bold text-gray-900", children: "Ch\u1EC9nh s\u1EEDa h\u1ED9 kh\u1EA9u" }), _jsx("button", { onClick: () => {
-                                        setShowEditForm(false);
-                                        setEditingHoKhauId(null);
-                                    }, className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600", "aria-label": "\u0110\u00F3ng ch\u1EC9nh s\u1EEDa", children: "\u2715" })] }), _jsxs("form", { onSubmit: handleUpdate, className: "space-y-4", children: [_jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["S\u1ED1 h\u1ED9 kh\u1EA9u ", _jsx("span", { className: "text-red-500", children: "*" }), _jsx("input", { type: "text", required: true, value: editData.soHoKhau, onChange: (e) => setEditData({ ...editData, soHoKhau: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ng\u00E0y c\u1EA5p", _jsx("input", { type: "date", value: editData.ngayCap, onChange: (e) => setEditData({ ...editData, ngayCap: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u1ECBa ch\u1EC9 ", _jsx("span", { className: "text-red-500", children: "*" }), _jsx("input", { type: "text", required: true, value: editData.diaChi, onChange: (e) => setEditData({ ...editData, diaChi: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("div", { className: "grid grid-cols-3 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["T\u1EC9nh/Th\u00E0nh ph\u1ED1", _jsx("input", { type: "text", value: editData.tinhThanh, onChange: (e) => setEditData({ ...editData, tinhThanh: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Qu\u1EADn/Huy\u1EC7n", _jsx("input", { type: "text", value: editData.quanHuyen, onChange: (e) => setEditData({ ...editData, quanHuyen: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ph\u01B0\u1EDDng/X\u00E3", _jsx("input", { type: "text", value: editData.phuongXa, onChange: (e) => setEditData({ ...editData, phuongXa: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u01B0\u1EDDng/Ph\u1ED1", _jsx("input", { type: "text", value: editData.duongPho, onChange: (e) => setEditData({ ...editData, duongPho: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["S\u1ED1 nh\u00E0", _jsx("input", { type: "text", value: editData.soNha, onChange: (e) => setEditData({ ...editData, soNha: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ghi ch\u00FA", _jsx("textarea", { value: editData.ghiChu, onChange: (e) => setEditData({ ...editData, ghiChu: e.target.value }), rows: 3, className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", placeholder: "Ghi ch\u00FA th\u00EAm..." })] }), _jsxs("div", { className: "flex gap-3 pt-4", children: [_jsx("button", { type: "submit", disabled: isLoading, className: "flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50", children: isLoading ? "Đang lưu..." : "Lưu thay đổi" }), _jsx("button", { type: "button", onClick: () => {
-                                                setShowEditForm(false);
-                                                setEditingHoKhauId(null);
-                                            }, className: "rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50", children: "H\u1EE7y" })] })] })] }) })), _jsxs("div", { className: "rounded-xl border border-gray-200 bg-white shadow-sm", children: [_jsx("div", { className: "border-b border-gray-200 p-4", children: _jsxs("h2", { className: "text-lg font-semibold text-gray-900", children: ["Danh s\u00E1ch h\u1ED9 kh\u1EA9u (", hoKhauList.length, ")"] }) }), isLoading && hoKhauList.length === 0 ? (_jsx("div", { className: "p-8 text-center text-gray-500", children: "\u0110ang t\u1EA3i..." })) : hoKhauList.length === 0 ? (_jsx("div", { className: "p-8 text-center text-gray-500", children: "Ch\u01B0a c\u00F3 h\u1ED9 kh\u1EA9u n\u00E0o. H\u00E3y t\u1EA1o h\u1ED9 kh\u1EA9u m\u1EDBi!" })) : (_jsx("div", { className: "overflow-x-auto", children: _jsxs("table", { className: "w-full", children: [_jsx("thead", { className: "bg-gray-50", children: _jsxs("tr", { children: [_jsx("th", { className: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700", children: "S\u1ED1 h\u1ED9 kh\u1EA9u" }), _jsx("th", { className: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700", children: "\u0110\u1ECBa ch\u1EC9" }), _jsx("th", { className: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700", children: "Tr\u1EA1ng th\u00E1i" }), _jsx("th", { className: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700", children: "Ng\u00E0y t\u1EA1o" }), _jsx("th", { className: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700", children: "Thao t\u00E1c" })] }) }), _jsx("tbody", { className: "divide-y divide-gray-200", children: hoKhauList.map((hk) => (_jsxs("tr", { className: "hover:bg-gray-50", children: [_jsx("td", { className: "px-4 py-3 text-sm font-medium text-gray-900", children: hk.soHoKhau }), _jsx("td", { className: "px-4 py-3 text-sm text-gray-600", children: hk.diaChi }), _jsx("td", { className: "px-4 py-3", children: getTrangThaiBadge(hk.trangThai) }), _jsx("td", { className: "px-4 py-3 text-sm text-gray-500", children: new Date(hk.createdAt).toLocaleDateString("vi-VN") }), _jsx("td", { className: "px-4 py-3", children: _jsxs("div", { className: "flex items-center gap-2", children: [_jsx("button", { onClick: () => openViewModal(hk), className: "rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 shadow-sm", "aria-label": "Xem nh\u00E2n kh\u1EA9u", children: "\uD83D\uDC41 Xem" }), _jsx("button", { onClick: () => openEditForm(hk), className: "rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 shadow-sm", "aria-label": "Ch\u1EC9nh s\u1EEDa h\u1ED9 kh\u1EA9u", children: "\u270F\uFE0F S\u1EEDa" })] }) })] }, hk.id))) })] }) }))] })] }));
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", children: [_jsx("option", { value: "", children: "Ch\u1ECDn quan h\u1EC7" }), Object.keys(quanHeLabel).map((key) => (_jsx("option", { value: key, children: quanHeLabel[key] }, key)))] })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u1ECBa ch\u1EC9 th\u01B0\u1EDDng tr\u00FA tr\u01B0\u1EDBc \u0111\u00E2y", _jsx("textarea", { value: memberViewForm.diaChiThuongTruTruoc || "", onChange: (e) => setMemberViewForm({
+                                                ...memberViewForm,
+                                                diaChiThuongTruTruoc: e.target.value,
+                                            }), rows: 2, className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ngh\u1EC1 nghi\u1EC7p", _jsx("input", { type: "text", value: memberViewForm.ngheNghiep || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        ngheNghiep: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["N\u01A1i l\u00E0m vi\u1EC7c", _jsx("input", { type: "text", value: memberViewForm.noiLamViec || "", onChange: (e) => setMemberViewForm({
+                                                        ...memberViewForm,
+                                                        noiLamViec: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("div", { className: "flex gap-3 pt-4", children: [_jsx("button", { type: "submit", disabled: memberViewSaving, className: "flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50", children: memberViewSaving ? "Đang lưu..." : "Lưu thay đổi" }), _jsx("button", { type: "button", onClick: () => {
+                                                setShowMemberViewModal(false);
+                                                setViewingNhanKhauDetail(null);
+                                                setMemberViewError(null);
+                                            }, className: "rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50", children: "\u0110\u00F3ng" })] })] }))] }) })), success && (_jsx("div", { className: "rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-sm text-emerald-700", children: success })), showCreateForm && (_jsx("div", { className: "fixed inset-0 z-[120] flex min-h-screen w-screen items-center justify-center bg-black/50 backdrop-blur-sm p-4", children: _jsxs("div", { className: "w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl", children: [_jsxs("div", { className: "mb-6 flex items-center justify-between", children: [_jsx("h2", { className: "text-xl font-bold text-gray-900", children: "T\u1EA1o h\u1ED9 kh\u1EA9u m\u1EDBi" }), _jsx("button", { onClick: () => setShowCreateForm(false), className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600", children: "\u2715" })] }), _jsxs("form", { onSubmit: handleSubmit, className: "space-y-4", children: [_jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["S\u1ED1 h\u1ED9 kh\u1EA9u ", _jsx("span", { className: "text-red-500", children: "*" }), _jsx("input", { type: "text", required: true, value: formData.soHoKhau, onChange: (e) => setFormData({ ...formData, soHoKhau: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", placeholder: "VD: HK001" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ng\u00E0y c\u1EA5p", _jsx("input", { type: "date", value: formData.ngayCap, onChange: (e) => setFormData({ ...formData, ngayCap: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u1ECBa ch\u1EC9 ", _jsx("span", { className: "text-red-500", children: "*" }), _jsx("input", { type: "text", required: true, value: formData.diaChi, onChange: (e) => setFormData({ ...formData, diaChi: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", placeholder: "\u0110\u1ECBa ch\u1EC9 \u0111\u1EA7y \u0111\u1EE7" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u1ECBa ch\u1EC9 \u0111\u1EA7y \u0111\u1EE7", _jsx("textarea", { value: formData.diaChiDayDu, onChange: (e) => setFormData({ ...formData, diaChiDayDu: e.target.value }), rows: 2, className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", placeholder: "Nh\u1EADp \u0111\u1ECBa ch\u1EC9 \u0111\u1EA7y \u0111\u1EE7 n\u1EBFu c\u1EA7n" })] }), _jsxs("div", { className: "grid grid-cols-3 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["T\u1EC9nh/Th\u00E0nh ph\u1ED1", _jsx("input", { type: "text", value: formData.tinhThanh, onChange: (e) => setFormData({ ...formData, tinhThanh: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Qu\u1EADn/Huy\u1EC7n", _jsx("input", { type: "text", value: formData.quanHuyen, onChange: (e) => setFormData({ ...formData, quanHuyen: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ph\u01B0\u1EDDng/X\u00E3", _jsx("input", { type: "text", value: formData.phuongXa, onChange: (e) => setFormData({ ...formData, phuongXa: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u01B0\u1EDDng/Ph\u1ED1", _jsx("input", { type: "text", value: formData.duongPho, onChange: (e) => setFormData({ ...formData, duongPho: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["S\u1ED1 nh\u00E0", _jsx("input", { type: "text", value: formData.soNha, onChange: (e) => setFormData({ ...formData, soNha: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ghi ch\u00FA", _jsx("textarea", { value: formData.ghiChu, onChange: (e) => setFormData({ ...formData, ghiChu: e.target.value }), rows: 3, className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", placeholder: "Ghi ch\u00FA th\u00EAm..." })] }), _jsxs("div", { className: "flex gap-3 pt-4", children: [_jsx("button", { type: "submit", disabled: isLoading, className: "flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50", children: isLoading ? "Đang tạo..." : "Tạo hộ khẩu" }), _jsx("button", { type: "button", onClick: () => setShowCreateForm(false), className: "rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50", children: "H\u1EE7y" })] })] })] }) })), showViewModal && viewingHoKhau && (_jsx("div", { className: "fixed inset-0 z-[120] flex min-h-screen w-screen items-center justify-center bg-black/50 backdrop-blur-sm p-4", children: _jsxs("div", { className: "w-full max-w-4xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl", children: [_jsxs("div", { className: "mb-4 flex items-center justify-between", children: [_jsxs("div", { children: [_jsxs("h2", { className: "text-xl font-bold text-gray-900", children: ["H\u1ED9 kh\u1EA9u ", viewingHoKhau.soHoKhau] }), _jsxs("p", { className: "text-sm text-gray-500", children: ["\u0110\u1ECBa ch\u1EC9: ", viewingHoKhau.diaChi] })] }), _jsx("button", { onClick: closeViewHousehold, className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600", children: "\u2715" })] }), viewError && (_jsx("div", { className: "mb-3 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700", children: viewError })), _jsxs("div", { className: "mb-4 grid grid-cols-2 gap-4 text-sm text-gray-700", children: [_jsxs("div", { className: "space-y-1", children: [_jsx("div", { className: "font-semibold text-gray-900", children: "Th\u00F4ng tin h\u1ED9 kh\u1EA9u" }), _jsxs("div", { children: ["S\u1ED1 h\u1ED9 kh\u1EA9u: ", viewingHoKhau.soHoKhau] }), _jsxs("div", { children: ["\u0110\u1ECBa ch\u1EC9: ", viewingHoKhau.diaChi] }), viewingHoKhau.diaChiDayDu && (_jsxs("div", { children: ["\u0110\u1ECBa ch\u1EC9 \u0111\u1EA7y \u0111\u1EE7: ", viewingHoKhau.diaChiDayDu] })), _jsxs("div", { children: ["Tr\u1EA1ng th\u00E1i: ", getTrangThaiBadge(viewingHoKhau.trangThai)] })] }), _jsxs("div", { className: "space-y-1", children: [_jsx("div", { className: "font-semibold text-gray-900", children: "\u0110\u1ECBa b\u00E0n" }), viewingHoKhau.tinhThanh && (_jsxs("div", { children: ["T\u1EC9nh/Th\u00E0nh: ", viewingHoKhau.tinhThanh] })), viewingHoKhau.quanHuyen && (_jsxs("div", { children: ["Qu\u1EADn/Huy\u1EC7n: ", viewingHoKhau.quanHuyen] })), viewingHoKhau.phuongXa && (_jsxs("div", { children: ["Ph\u01B0\u1EDDng/X\u00E3: ", viewingHoKhau.phuongXa] })), (viewingHoKhau.duongPho || viewingHoKhau.soNha) && (_jsxs("div", { children: ["\u0110\u01B0\u1EDDng/Ph\u1ED1 - S\u1ED1 nh\u00E0: ", viewingHoKhau.duongPho || "-", " ", viewingHoKhau.soNha || ""] })), viewingHoKhau.ngayCap && (_jsxs("div", { children: ["Ng\u00E0y c\u1EA5p:", " ", new Date(viewingHoKhau.ngayCap).toLocaleDateString("vi-VN")] })), viewingHoKhau.ghiChu && (_jsxs("div", { children: ["Ghi ch\u00FA: ", viewingHoKhau.ghiChu] }))] })] }), viewLoading ? (_jsx("div", { className: "p-4 text-center text-gray-500", children: "\u0110ang t\u1EA3i nh\u00E2n kh\u1EA9u..." })) : viewNhanKhau.length === 0 ? (_jsx("div", { className: "p-4 text-center text-gray-500", children: "H\u1ED9 kh\u1EA9u n\u00E0y ch\u01B0a c\u00F3 nh\u00E2n kh\u1EA9u n\u00E0o." })) : (_jsx("div", { className: "max-h-[420px] overflow-y-auto", children: _jsxs("table", { className: "w-full text-sm", children: [_jsx("thead", { className: "bg-gray-50", children: _jsxs("tr", { children: [_jsx("th", { className: "px-4 py-2 text-left font-semibold text-gray-700", children: "H\u1ECD t\u00EAn" }), _jsx("th", { className: "px-4 py-2 text-left font-semibold text-gray-700", children: "CCCD" }), _jsx("th", { className: "px-4 py-2 text-left font-semibold text-gray-700", children: "Quan h\u1EC7" }), _jsx("th", { className: "px-4 py-2 text-left font-semibold text-gray-700", children: "Gi\u1EDBi t\u00EDnh" }), _jsx("th", { className: "px-4 py-2 text-left font-semibold text-gray-700", children: "Ng\u00E0y sinh" }), _jsx("th", { className: "px-4 py-2 text-right font-semibold text-gray-700", children: "Thao t\u00E1c" })] }) }), _jsx("tbody", { className: "divide-y divide-gray-200", children: viewNhanKhau.map((nk) => (_jsxs("tr", { className: nk.quanHe === "chu_ho" ? "bg-blue-50/40" : "", children: [_jsxs("td", { className: "px-4 py-2 font-medium text-gray-900", children: [nk.hoTen, nk.quanHe === "chu_ho" && (_jsx("span", { className: "ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700", children: "Ch\u1EE7 h\u1ED9" }))] }), _jsx("td", { className: "px-4 py-2 text-gray-700", children: nk.cccd || "-" }), _jsx("td", { className: "px-4 py-2 text-gray-700", children: quanHeLabel[nk.quanHe] || nk.quanHe }), _jsx("td", { className: "px-4 py-2 text-gray-700", children: nk.gioiTinh === "nam"
+                                                        ? "Nam"
+                                                        : nk.gioiTinh === "nu"
+                                                            ? "Nữ"
+                                                            : nk.gioiTinh === "khac"
+                                                                ? "Khác"
+                                                                : "-" }), _jsx("td", { className: "px-4 py-2 text-gray-700", children: nk.ngaySinh
+                                                        ? new Date(nk.ngaySinh).toLocaleDateString("vi-VN")
+                                                        : "-" }), _jsx("td", { className: "px-4 py-2 text-right text-gray-700", children: _jsx("div", { className: "flex justify-end gap-2", children: _jsx("button", { onClick: () => openViewNhanKhau(nk.id), className: "rounded-md border border-gray-200 px-3 py-1 text-xs font-semibold text-gray-700 hover:border-blue-300 hover:text-blue-600", title: "Xem \u0111\u1EA7y \u0111\u1EE7", children: "\uD83D\uDC41 Xem" }) }) })] }, nk.id))) })] }) }))] }) })), showEditModal && editingHoKhau && (_jsx("div", { className: "fixed inset-0 z-[120] flex min-h-screen w-screen items-center justify-center bg-black/50 backdrop-blur-sm p-4", children: _jsxs("div", { className: "w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl", children: [_jsxs("div", { className: "mb-6 flex items-center justify-between", children: [_jsx("h2", { className: "text-xl font-bold text-gray-900", children: "Ch\u1EC9nh s\u1EEDa h\u1ED9 kh\u1EA9u" }), _jsx("button", { onClick: () => {
+                                        setShowEditModal(false);
+                                        setEditingHoKhau(null);
+                                    }, className: "rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600", children: "\u2715" })] }), _jsxs("form", { onSubmit: handleUpdate, className: "space-y-4", children: [_jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["S\u1ED1 h\u1ED9 kh\u1EA9u ", _jsx("span", { className: "text-red-500", children: "*" }), _jsx("input", { type: "text", required: true, value: editFormData.soHoKhau, onChange: (e) => setEditFormData({
+                                                        ...editFormData,
+                                                        soHoKhau: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ng\u00E0y c\u1EA5p", _jsx("input", { type: "date", value: editFormData.ngayCap, onChange: (e) => setEditFormData({
+                                                        ...editFormData,
+                                                        ngayCap: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u1ECBa ch\u1EC9 ", _jsx("span", { className: "text-red-500", children: "*" }), _jsx("input", { type: "text", required: true, value: editFormData.diaChi, onChange: (e) => setEditFormData({ ...editFormData, diaChi: e.target.value }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u1ECBa ch\u1EC9 \u0111\u1EA7y \u0111\u1EE7", _jsx("textarea", { value: editFormData.diaChiDayDu, onChange: (e) => setEditFormData({
+                                                ...editFormData,
+                                                diaChiDayDu: e.target.value,
+                                            }), rows: 2, className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20", placeholder: "Nh\u1EADp \u0111\u1ECBa ch\u1EC9 \u0111\u1EA7y \u0111\u1EE7 n\u1EBFu c\u1EA7n" })] }), _jsxs("div", { className: "grid grid-cols-3 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["T\u1EC9nh/Th\u00E0nh ph\u1ED1", _jsx("input", { type: "text", value: editFormData.tinhThanh, onChange: (e) => setEditFormData({
+                                                        ...editFormData,
+                                                        tinhThanh: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Qu\u1EADn/Huy\u1EC7n", _jsx("input", { type: "text", value: editFormData.quanHuyen, onChange: (e) => setEditFormData({
+                                                        ...editFormData,
+                                                        quanHuyen: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ph\u01B0\u1EDDng/X\u00E3", _jsx("input", { type: "text", value: editFormData.phuongXa, onChange: (e) => setEditFormData({
+                                                        ...editFormData,
+                                                        phuongXa: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("div", { className: "grid grid-cols-2 gap-4", children: [_jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["\u0110\u01B0\u1EDDng/Ph\u1ED1", _jsx("input", { type: "text", value: editFormData.duongPho, onChange: (e) => setEditFormData({
+                                                        ...editFormData,
+                                                        duongPho: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["S\u1ED1 nh\u00E0", _jsx("input", { type: "text", value: editFormData.soNha, onChange: (e) => setEditFormData({
+                                                        ...editFormData,
+                                                        soNha: e.target.value,
+                                                    }), className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] })] }), _jsxs("label", { className: "block text-sm font-medium text-gray-700", children: ["Ghi ch\u00FA", _jsx("textarea", { value: editFormData.ghiChu, onChange: (e) => setEditFormData({ ...editFormData, ghiChu: e.target.value }), rows: 3, className: "mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" })] }), _jsxs("div", { className: "flex gap-3 pt-4", children: [_jsx("button", { type: "submit", disabled: isLoading, className: "flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50", children: isLoading ? "Đang lưu..." : "Lưu thay đổi" }), _jsx("button", { type: "button", onClick: () => {
+                                                setShowEditModal(false);
+                                                setEditingHoKhau(null);
+                                            }, className: "rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50", children: "H\u1EE7y" })] })] })] }) })), _jsxs("div", { className: "rounded-xl border border-gray-200 bg-white shadow-sm", children: [_jsx("div", { className: "border-b border-gray-200 p-4", children: _jsxs("h2", { className: "text-lg font-semibold text-gray-900", children: ["Danh s\u00E1ch h\u1ED9 kh\u1EA9u (", hoKhauList.length, ")"] }) }), isLoading && hoKhauList.length === 0 ? (_jsx("div", { className: "p-8 text-center text-gray-500", children: "\u0110ang t\u1EA3i..." })) : hoKhauList.length === 0 ? (_jsx("div", { className: "p-8 text-center text-gray-500", children: "Ch\u01B0a c\u00F3 h\u1ED9 kh\u1EA9u n\u00E0o. H\u00E3y t\u1EA1o h\u1ED9 kh\u1EA9u m\u1EDBi!" })) : (_jsx("div", { className: "overflow-x-auto", children: _jsxs("table", { className: "w-full", children: [_jsx("thead", { className: "bg-gray-50", children: _jsxs("tr", { children: [_jsx("th", { className: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700", children: "S\u1ED1 h\u1ED9 kh\u1EA9u" }), _jsx("th", { className: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700", children: "\u0110\u1ECBa ch\u1EC9" }), _jsx("th", { className: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700", children: "Tr\u1EA1ng th\u00E1i" }), _jsx("th", { className: "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700", children: "Ng\u00E0y t\u1EA1o" }), _jsx("th", { className: "px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-700", children: "Thao t\u00E1c" })] }) }), _jsx("tbody", { className: "divide-y divide-gray-200", children: hoKhauList.map((hk) => (_jsxs("tr", { className: "hover:bg-gray-50", children: [_jsx("td", { className: "px-4 py-3 text-sm font-medium text-gray-900", children: hk.soHoKhau }), _jsx("td", { className: "px-4 py-3 text-sm text-gray-600", children: hk.diaChi }), _jsx("td", { className: "px-4 py-3", children: getTrangThaiBadge(hk.trangThai) }), _jsx("td", { className: "px-4 py-3 text-sm text-gray-500", children: new Date(hk.createdAt).toLocaleDateString("vi-VN") }), _jsxs("td", { className: "px-4 py-3 text-right space-x-2", children: [_jsxs("button", { onClick: () => openViewHousehold(hk), className: "inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600", title: "Xem nh\u00E2n kh\u1EA9u", children: [_jsx("span", { className: "sr-only", children: "Xem" }), _jsxs("svg", { xmlns: "http://www.w3.org/2000/svg", className: "h-4 w-4", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", children: [_jsx("path", { d: "M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" }), _jsx("circle", { cx: "12", cy: "12", r: "3" })] })] }), _jsxs("button", { onClick: () => openEditHousehold(hk), className: "inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-blue-300 hover:text-blue-600", title: "Ch\u1EC9nh s\u1EEDa h\u1ED9 kh\u1EA9u", children: [_jsx("span", { className: "sr-only", children: "S\u1EEDa" }), _jsxs("svg", { xmlns: "http://www.w3.org/2000/svg", className: "h-4 w-4", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", children: [_jsx("path", { d: "M12 20h9" }), _jsx("path", { d: "M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" })] })] })] })] }, hk.id))) })] }) }))] })] }));
 }

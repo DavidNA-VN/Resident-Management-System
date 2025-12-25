@@ -125,7 +125,7 @@ router.post(
 
 /**
  * PATCH /ho-khau/:id
- * Cập nhật thông tin hộ khẩu
+ * Cập nhật thông tin hộ khẩu (không thay đổi chủ hộ / trạng thái)
  */
 router.patch(
   "/ho-khau/:id",
@@ -134,20 +134,10 @@ router.patch(
   async (req, res, next) => {
     try {
       const hoKhauId = Number(req.params.id);
-      if (!Number.isInteger(hoKhauId) || hoKhauId <= 0) {
+      if (!hoKhauId) {
         return res.status(400).json({
           success: false,
-          error: { code: "VALIDATION_ERROR", message: "Invalid hoKhauId" },
-        });
-      }
-
-      const current = await query(`SELECT * FROM ho_khau WHERE id = $1`, [
-        hoKhauId,
-      ]);
-      if (current.rowCount === 0) {
-        return res.status(404).json({
-          success: false,
-          error: { code: "NOT_FOUND", message: "Hộ khẩu không tồn tại" },
+          error: { code: "VALIDATION_ERROR", message: "Missing hoKhauId" },
         });
       }
 
@@ -164,57 +154,57 @@ router.patch(
         ghiChu,
       } = req.body;
 
-      const merged = {
-        soHoKhau: soHoKhau ?? current.rows[0].soHoKhau,
-        diaChi: diaChi ?? current.rows[0].diaChi,
-        tinhThanh: tinhThanh ?? current.rows[0].tinhThanh,
-        quanHuyen: quanHuyen ?? current.rows[0].quanHuyen,
-        phuongXa: phuongXa ?? current.rows[0].phuongXa,
-        duongPho: duongPho ?? current.rows[0].duongPho,
-        soNha: soNha ?? current.rows[0].soNha,
-        diaChiDayDu: diaChiDayDu ?? current.rows[0].diaChiDayDu,
-        ngayCap: ngayCap ?? current.rows[0].ngayCap,
-        ghiChu: ghiChu ?? current.rows[0].ghiChu,
-      };
+      const fields: { column: string; value: any }[] = [];
 
-      if (!merged.soHoKhau || !merged.diaChi) {
+      if (soHoKhau !== undefined)
+        fields.push({ column: "soHoKhau", value: soHoKhau });
+      if (diaChi !== undefined)
+        fields.push({ column: "diaChi", value: diaChi });
+      if (tinhThanh !== undefined)
+        fields.push({ column: "tinhThanh", value: tinhThanh });
+      if (quanHuyen !== undefined)
+        fields.push({ column: "quanHuyen", value: quanHuyen });
+      if (phuongXa !== undefined)
+        fields.push({ column: "phuongXa", value: phuongXa });
+      if (duongPho !== undefined)
+        fields.push({ column: "duongPho", value: duongPho });
+      if (soNha !== undefined) fields.push({ column: "soNha", value: soNha });
+      if (diaChiDayDu !== undefined)
+        fields.push({ column: "diaChiDayDu", value: diaChiDayDu });
+      if (ngayCap !== undefined)
+        fields.push({ column: "ngayCap", value: ngayCap });
+      if (ghiChu !== undefined)
+        fields.push({ column: "ghiChu", value: ghiChu });
+
+      if (fields.length === 0) {
         return res.status(400).json({
           success: false,
           error: {
             code: "VALIDATION_ERROR",
-            message: "Missing soHoKhau or diaChi",
+            message: "Không có trường nào để cập nhật",
           },
         });
       }
 
+      const setClauses = fields
+        .map((f, idx) => `"${f.column}" = $${idx + 1}`)
+        .join(", ");
+      const values = fields.map((f) => (f.value === "" ? null : f.value));
+
       const r = await query(
         `UPDATE ho_khau
-         SET "soHoKhau" = $1,
-             "diaChi" = $2,
-             "tinhThanh" = $3,
-             "quanHuyen" = $4,
-             "phuongXa" = $5,
-             "duongPho" = $6,
-             "soNha" = $7,
-             "diaChiDayDu" = $8,
-             "ngayCap" = $9,
-             "ghiChu" = $10
-         WHERE id = $11
+         SET ${setClauses}
+         WHERE id = $${fields.length + 1}
          RETURNING *`,
-        [
-          merged.soHoKhau,
-          merged.diaChi,
-          merged.tinhThanh,
-          merged.quanHuyen,
-          merged.phuongXa,
-          merged.duongPho,
-          merged.soNha,
-          merged.diaChiDayDu,
-          merged.ngayCap,
-          merged.ghiChu,
-          hoKhauId,
-        ]
+        [...values, hoKhauId]
       );
+
+      if (r.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Hộ khẩu không tồn tại" },
+        });
+      }
 
       return res.json({ success: true, data: r.rows[0] });
     } catch (err) {

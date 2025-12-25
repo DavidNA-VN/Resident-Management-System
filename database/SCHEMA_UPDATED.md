@@ -1,4 +1,4 @@
-# Cập nhật Schema Database
+# Cập nhật Schema Database.
 
 ## 📋 Tổng quan các thay đổi
 
