@@ -22,6 +22,13 @@ export interface AuthResponse {
       username: string;
       role: string;
       fullName: string;
+      linked?: boolean; // Chỉ cho role="nguoi_dan"
+      personInfo?: {
+        personId: number;
+        hoTen: string;
+        householdId: number;
+      };
+      message?: string; // Thông báo khi chưa linked
     };
   };
   error?: {
@@ -50,6 +57,13 @@ export interface UserInfo {
   username: string;
   role: "to_truong" | "to_pho" | "can_bo" | "nguoi_dan";
   task: "hokhau_nhankhau" | "tamtru_tamvang" | "thongke" | "kiennghi" | null;
+  linked?: boolean; // Chỉ cho role="nguoi_dan"
+  personInfo?: {
+    personId: number;
+    hoTen: string;
+    householdId: number;
+  };
+  message?: string; // Thông báo khi chưa linked
 }
 
 export interface MeResponse {
@@ -116,6 +130,12 @@ class ApiService {
 
   async getMe(): Promise<MeResponse> {
     return this.request<MeResponse>("/auth/me", {
+      method: "GET",
+    });
+  }
+
+  async getCitizenHouseholds() {
+    return this.request<{ success: boolean; data: any[] }>("/citizen/households", {
       method: "GET",
     });
   }
@@ -194,6 +214,20 @@ class ApiService {
       {
         method: "PATCH",
         body: JSON.stringify({ chuHoId }),
+      }
+    );
+  }
+
+  async changeChuHo(
+    hoKhauId: number,
+    newChuHoId: number,
+    oldChuHoNewQuanHe?: string
+  ) {
+    return this.request<{ success: boolean; data: any }>(
+      `/ho-khau/${hoKhauId}/change-chu-ho`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ newChuHoId, oldChuHoNewQuanHe }),
       }
     );
   }
@@ -296,6 +330,10 @@ class ApiService {
         members: any[];
         chuHo?: any;
       };
+      error?: {
+        code: string;
+        message: string;
+      };
     }>("/citizen/household", {
       method: "GET",
     });
@@ -309,7 +347,13 @@ class ApiService {
   }
 
   async getMyRequests() {
-    return this.request<{ success: boolean; data: any[] }>("/requests/me", {
+    return this.request<{ success: boolean; data: any[] }>("/requests/my", {
+      method: "GET",
+    });
+  }
+
+  async getLeaderRequests() {
+    return this.request<{ success: boolean; data: any[] }>("/requests", {
       method: "GET",
     });
   }
@@ -484,100 +528,38 @@ class ApiService {
     }
   }
 
-  // TODO: Thay bằng API thật khi backend sẵn sàng
-  // GET /requests/:id - Lấy chi tiết yêu cầu
   async getRequestDetail(requestId: number) {
-    try {
-      return await this.request<{ success: boolean; data: any }>(
-        `/requests/${requestId}`,
-        {
-          method: "GET",
-        }
-      );
-    } catch (err) {
-      // Mock data nếu API chưa sẵn sàng
-      console.warn(
-        `API /requests/${requestId} chưa sẵn sàng, sử dụng mock data`
-      );
-      return Promise.resolve({
-        success: true,
-        data: {
-          id: requestId,
-          type: "TACH_HO_KHAU",
-          status: "pending",
-          nguoiGui: {
-            hoTen: "Nguyễn Văn A",
-            cccd: "079912345678",
-          },
-          hoKhauLienQuan: {
-            id: 1,
-            soHoKhau: "HK001234",
-            diaChi: "Số 123, Đường ABC",
-          },
-          createdAt: new Date().toISOString(),
-          payload: {
-            selectedNhanKhauIds: [1, 2],
-            newChuHoId: 2,
-            newAddress: "Số 789, Đường XYZ",
-            expectedDate: "2025-12-24",
-            reason: "Tách hộ để quản lý riêng",
-            note: "Đã chuẩn bị đầy đủ giấy tờ",
-          },
-        },
-      });
-    }
+    return this.request<{ success: boolean; data: any }>(
+      `/requests/${requestId}`,
+      {
+        method: "GET",
+      }
+    );
   }
 
-  // TODO: Thay bằng API thật khi backend sẵn sàng
-  // POST /requests/:id/approve - Duyệt yêu cầu
-  async approveRequest(requestId: number) {
-    try {
-      return await this.request<{ success: boolean; data: any }>(
-        `/requests/${requestId}/approve`,
-        {
-          method: "POST",
-        }
-      );
-    } catch (err: any) {
-      // Mock response nếu API chưa sẵn sàng
-      console.warn(
-        `API /requests/${requestId}/approve chưa sẵn sàng, sử dụng mock response`
-      );
-      return Promise.resolve({
-        success: true,
-        data: {
-          id: requestId,
-          status: "approved",
-        },
-      });
+  async approveRequest(requestId: number, householdId?: string) {
+    const body: any = {};
+    if (householdId) {
+      body.householdId = parseInt(householdId);
     }
+
+    return this.request<{ success: boolean; data: any }>(
+      `/requests/${requestId}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }
+    );
   }
 
-  // TODO: Thay bằng API thật khi backend sẵn sàng
-  // POST /requests/:id/reject - Từ chối yêu cầu
   async rejectRequest(requestId: number, reason: string) {
-    try {
-      return await this.request<{ success: boolean; data: any }>(
-        `/requests/${requestId}/reject`,
-        {
-          method: "POST",
-          body: JSON.stringify({ reason }),
-        }
-      );
-    } catch (err: any) {
-      // Mock response nếu API chưa sẵn sàng
-      console.warn(
-        `API /requests/${requestId}/reject chưa sẵn sàng, sử dụng mock response`
-      );
-      return Promise.resolve({
-        success: true,
-        data: {
-          id: requestId,
-          status: "rejected",
-          rejectReason: reason,
-        },
-      });
-    }
+    return this.request<{ success: boolean; data: any }>(
+      `/requests/${requestId}/reject`,
+      {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }
+    );
   }
 }
 

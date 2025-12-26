@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import RequestModal, { RequestType } from "../../components/RequestModal";
 import SplitHouseholdRequestModal, {
   SplitHouseholdRequestData,
@@ -27,11 +27,15 @@ interface Request {
   id: number;
   type: string;
   status: string;
+  rejectionReason?: string;
   createdAt: string;
+  reviewedAt?: string;
   payload: any;
 }
 
 const requestTypeLabels: Record<string, string> = {
+  ADD_PERSON: "Thêm nhân khẩu",
+  ADD_NEWBORN: "Thêm con sơ sinh",
   TAM_VANG: "Xin tạm vắng",
   TAM_TRU: "Xin tạm trú",
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
@@ -40,6 +44,9 @@ const requestTypeLabels: Record<string, string> = {
 };
 
 const statusLabels: Record<string, string> = {
+  PENDING: "Chờ duyệt",
+  APPROVED: "Đã duyệt",
+  REJECTED: "Từ chối",
   pending: "Chờ duyệt",
   approved: "Đã duyệt",
   rejected: "Từ chối",
@@ -47,6 +54,9 @@ const statusLabels: Record<string, string> = {
 };
 
 const statusColors: Record<string, string> = {
+  PENDING: "bg-yellow-100 text-yellow-700",
+  APPROVED: "bg-green-100 text-green-700",
+  REJECTED: "bg-red-100 text-red-700",
   pending: "bg-yellow-100 text-yellow-700",
   approved: "bg-green-100 text-green-700",
   rejected: "bg-red-100 text-red-700",
@@ -54,22 +64,50 @@ const statusColors: Record<string, string> = {
 };
 
 export default function YeuCau() {
-  const [selectedType, setSelectedType] = useState<RequestType | "TACH_HO_KHAU" | null>(null);
+  const [selectedType, setSelectedType] = useState<RequestType | "TACH_HO_KHAU" | "ADD_NEWBORN" | "ADD_PERSON" | null>(null);
+  const [showAddNewbornModal, setShowAddNewbornModal] = useState(false);
+  const [showAddPersonModal, setShowAddPersonModal] = useState(false);
+  const [userInfo, setUserInfo] = useState<any>(null);
   const [nhanKhauList, setNhanKhauList] = useState<NhanKhau[]>([]);
   const [householdInfo, setHouseholdInfo] = useState<Household | null>(null);
+  const [households, setHouseholds] = useState<any[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHousehold, setIsLoadingHousehold] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
+    loadUserInfo();
     loadHouseholdData();
+    loadHouseholds();
     loadRequests();
   }, []);
 
-  // Load household data khi mở modal tách hộ khẩu
+  const loadUserInfo = async () => {
+    try {
+      const response = await apiService.getMe();
+      if (response.success) {
+        setUserInfo(response.data);
+      }
+    } catch (err) {
+      console.error("Lỗi khi tải thông tin user:", err);
+    }
+  };
+
+  const loadHouseholds = async () => {
+    try {
+      const response = await apiService.getCitizenHouseholds();
+      if (response.success) {
+        setHouseholds(response.data || []);
+      }
+    } catch (err) {
+      console.error("Lỗi khi tải danh sách hộ khẩu:", err);
+    }
+  };
+
+  // Load household data khi mở modal tách hộ khẩu hoặc thêm con sơ sinh
   useEffect(() => {
-    if (selectedType === "TACH_HO_KHAU" && !householdInfo) {
+    if ((selectedType === "TACH_HO_KHAU" || selectedType === "ADD_NEWBORN") && !householdInfo) {
       loadHouseholdData();
     }
   }, [selectedType]);
@@ -123,7 +161,7 @@ export default function YeuCau() {
 
   const handleSubmitRequest = async (data: { type: string; payload: any }) => {
     const response = await apiService.createRequest(
-      data as { type: RequestType | "TACH_HO_KHAU"; payload: any }
+      data as { type: RequestType | "TACH_HO_KHAU" | "ADD_NEWBORN"; payload: any }
     );
     if (response.success) {
       setSuccess("Gửi yêu cầu thành công!");
@@ -150,7 +188,93 @@ export default function YeuCau() {
     }
   };
 
-  const requestTypes: Array<{ type: RequestType | "TACH_HO_KHAU"; label: string; icon: string }> = [
+  const handleSubmitAddNewborn = async (data: any) => {
+    try {
+      const payload = {
+        type: "ADD_NEWBORN",
+        targetHouseholdId: data.householdId,
+        payload: {
+          newborn: {
+            hoTen: data.hoTen,
+            ngaySinh: data.ngaySinh,
+            gioiTinh: data.gioiTinh,
+            noiSinh: data.noiSinh,
+            nguyenQuan: data.nguyenQuan || undefined,
+            danToc: data.danToc || undefined,
+            tonGiao: data.tonGiao || undefined,
+            quocTich: data.quocTich || undefined,
+            cccd: data.cccd || undefined,
+            ghiChu: data.ghiChu || undefined,
+            isMoiSinh: true,
+          }
+        }
+      };
+
+      const response = await apiService.createRequest(payload);
+      if (response.success) {
+        setSuccess("Gửi yêu cầu thêm con sơ sinh thành công!");
+        setTimeout(() => setSuccess(null), 3000);
+        loadRequests();
+        setShowAddNewbornModal(false);
+      } else {
+        throw new Error(response.error?.message || "Gửi yêu cầu thất bại");
+      }
+    } catch (err: any) {
+      throw err;
+    }
+  };
+
+  const handleSubmitAddPerson = async (data: any) => {
+    try {
+      const payload: any = {
+        type: "ADD_PERSON",
+        payload: {
+          person: {
+            hoTen: data.hoTen,
+            cccd: data.cccd || undefined,
+            ngaySinh: data.ngaySinh,
+            gioiTinh: data.gioiTinh,
+            noiSinh: data.noiSinh,
+            nguyenQuan: data.nguyenQuan || undefined,
+            danToc: data.danToc || undefined,
+            tonGiao: data.tonGiao || undefined,
+            quocTich: data.quocTich || "Việt Nam",
+            ngayDangKyThuongTru: data.ngayDangKyThuongTru || undefined,
+            diaChiThuongTruTruoc: data.diaChiThuongTruTruoc || undefined,
+            ngheNghiep: data.ngheNghiep || undefined,
+            noiLamViec: data.noiLamViec || undefined,
+            ghiChu: data.ghiChu || undefined,
+          }
+        }
+      };
+
+      // Chỉ thêm targetHouseholdId nếu có giá trị và không phải empty string
+      if (data.householdId && data.householdId !== "") {
+        payload.targetHouseholdId = parseInt(data.householdId);
+      }
+
+      // Thêm quanHe nếu user chưa linked
+      if (!userInfo?.linked && data.quanHe) {
+        payload.payload.person.quanHe = data.quanHe;
+      }
+
+      const response = await apiService.createRequest(payload);
+      if (response.success) {
+        setSuccess("Gửi yêu cầu thêm nhân khẩu thành công!");
+        setTimeout(() => setSuccess(null), 3000);
+        loadRequests();
+        setShowAddPersonModal(false);
+      } else {
+        throw new Error(response.error?.message || "Gửi yêu cầu thất bại");
+      }
+    } catch (err: any) {
+      throw err;
+    }
+  };
+
+  const requestTypes: Array<{ type: RequestType | "TACH_HO_KHAU" | "ADD_NEWBORN" | "ADD_PERSON"; label: string; icon: string }> = [
+    { type: "ADD_PERSON", label: "Thêm nhân khẩu", icon: "👤" },
+    { type: "ADD_NEWBORN", label: "Thêm con sơ sinh", icon: "👶" },
     { type: "TAM_VANG", label: "Xin tạm vắng", icon: "📍" },
     { type: "TAM_TRU", label: "Xin tạm trú", icon: "🏠" },
     { type: "TACH_HO_KHAU", label: "Yêu cầu tách hộ khẩu", icon: "🔄" },
@@ -182,7 +306,15 @@ export default function YeuCau() {
         {requestTypes.map((item) => (
           <button
             key={item.type}
-            onClick={() => setSelectedType(item.type)}
+            onClick={() => {
+              if (item.type === "ADD_NEWBORN") {
+                setShowAddNewbornModal(true);
+              } else if (item.type === "ADD_PERSON") {
+                setShowAddPersonModal(true);
+              } else {
+                setSelectedType(item.type);
+              }
+            }}
             className="rounded-xl border border-gray-200/80 bg-white p-6 shadow-sm hover:shadow-lg hover:border-blue-300 transition-all duration-300 hover:-translate-y-1 text-left group"
           >
             <div className="text-4xl mb-3 group-hover:scale-110 transition-transform">
@@ -240,6 +372,17 @@ export default function YeuCau() {
                         <span className="font-medium">Lý do:</span> {request.payload.lyDo}
                       </p>
                     )}
+                    {request.status === "REJECTED" && request.rejectionReason && (
+                      <p className="text-sm text-red-700">
+                        <span className="font-medium">Lý do từ chối:</span> {request.rejectionReason}
+                      </p>
+                    )}
+                    {request.status === "APPROVED" && request.reviewedAt && (
+                      <p className="text-sm text-green-700">
+                        <span className="font-medium">Đã duyệt:</span>{" "}
+                        {new Date(request.reviewedAt).toLocaleDateString("vi-VN")}
+                      </p>
+                    )}
                   </div>
                   <span
                     className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
@@ -277,6 +420,671 @@ export default function YeuCau() {
         nhanKhauList={nhanKhauList}
         isLoading={isLoadingHousehold}
       />
+
+      {/* Modal thêm con sơ sinh */}
+      {showAddNewbornModal && (
+        <AddNewbornModal
+          isOpen={showAddNewbornModal}
+          onClose={() => setShowAddNewbornModal(false)}
+          onSubmit={handleSubmitAddNewborn}
+          householdInfo={householdInfo}
+        />
+      )}
+
+      {/* Modal thêm nhân khẩu */}
+      {showAddPersonModal && (
+        <AddPersonModal
+          isOpen={showAddPersonModal}
+          onClose={() => setShowAddPersonModal(false)}
+          onSubmit={handleSubmitAddPerson}
+          householdInfo={householdInfo}
+          userInfo={userInfo}
+          households={households}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal thêm nhân khẩu
+interface AddPersonModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: any) => Promise<void>;
+  householdInfo: Household | null;
+  userInfo: any;
+  households: any[];
+}
+
+function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, households }: AddPersonModalProps) {
+  const [formData, setFormData] = useState({
+    householdId: "",
+    hoTen: "",
+    cccd: "",
+    ngaySinh: "",
+    gioiTinh: "",
+    noiSinh: "",
+    nguyenQuan: "",
+    danToc: "",
+    tonGiao: "",
+    quocTich: "Việt Nam",
+    quanHe: "",
+    ngayDangKyThuongTru: "",
+    diaChiThuongTruTruoc: "",
+    ngheNghiep: "",
+    noiLamViec: "",
+    ghiChu: "",
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const isUserLinked = userInfo?.linked === true;
+
+  useEffect(() => {
+    if (isOpen) {
+      if (isUserLinked && householdInfo) {
+        // User đã linked, tự động điền household của họ
+        setFormData(prev => ({
+          ...prev,
+          householdId: householdInfo.id.toString(),
+        }));
+      } else {
+        // User chưa linked, để trống householdId
+        setFormData(prev => ({
+          ...prev,
+          householdId: "",
+        }));
+      }
+    }
+  }, [isOpen, householdInfo, isUserLinked]);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    // Validation
+    const requiredFields = ["hoTen", "ngaySinh", "gioiTinh", "noiSinh"];
+    if (isUserLinked) {
+      requiredFields.push("quanHe");
+    }
+
+    const missingFields = requiredFields.filter(field => !formData[field]);
+    if (missingFields.length > 0) {
+      setError(`Vui lòng điền đầy đủ các trường bắt buộc: ${missingFields.join(", ")}`);
+      return;
+    }
+
+    // Nếu user chưa linked, quanHe là bắt buộc
+    if (!isUserLinked && !formData.quanHe) {
+      setError("Vui lòng chọn quan hệ với chủ hộ");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await onSubmit(formData);
+    } catch (err: any) {
+      setError(err.message || "Có lỗi xảy ra");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[120] flex min-h-screen w-screen items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-900">
+            Thêm nhân khẩu
+          </h3>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            ✕
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Hộ khẩu */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Hộ khẩu {isUserLinked && <span className="text-red-500">*</span>}
+            </label>
+            {isUserLinked ? (
+              <input
+                type="text"
+                value={`${householdInfo?.soHoKhau || ""} - ${householdInfo?.diaChi || ""}`}
+                disabled
+                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm"
+              />
+            ) : (
+              <div className="space-y-2">
+                <select
+                  value={formData.householdId}
+                  onChange={(e) => setFormData({ ...formData, householdId: e.target.value })}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="">Chọn hộ khẩu (tùy chọn)</option>
+                  {households.map((household) => (
+                    <option key={household.id} value={household.id}>
+                      {household.soHoKhau} - {household.diaChi}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500">
+                  Chọn hộ khẩu bạn muốn gia nhập. Nếu không có hộ khẩu phù hợp, để trống và tổ trưởng sẽ xử lý.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Thông tin nhân khẩu */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Họ và tên <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.hoTen}
+                onChange={(e) => setFormData({ ...formData, hoTen: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Nhập họ và tên"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                CCCD/CMND
+              </label>
+              <input
+                type="text"
+                value={formData.cccd}
+                onChange={(e) => setFormData({ ...formData, cccd: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Nhập số CCCD nếu có"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Ngày sinh <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                required
+                value={formData.ngaySinh}
+                onChange={(e) => setFormData({ ...formData, ngaySinh: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Giới tính <span className="text-red-500">*</span>
+              </label>
+              <select
+                required
+                value={formData.gioiTinh}
+                onChange={(e) => setFormData({ ...formData, gioiTinh: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option value="">Chọn giới tính</option>
+                <option value="nam">Nam</option>
+                <option value="nu">Nữ</option>
+                <option value="khac">Khác</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Quan hệ <span className="text-red-500">*</span>
+              </label>
+              <select
+                required
+                value={formData.quanHe}
+                onChange={(e) => setFormData({ ...formData, quanHe: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option value="">Chọn quan hệ</option>
+                <option value="chu_ho">Chủ hộ</option>
+                <option value="vo_chong">Vợ/Chồng</option>
+                <option value="con">Con</option>
+                <option value="cha_me">Cha/Mẹ</option>
+                <option value="anh_chi_em">Anh/Chị/Em</option>
+                <option value="ong_ba">Ông/Bà</option>
+                <option value="chau">Cháu</option>
+                <option value="khac">Khác</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Nơi sinh <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={formData.noiSinh}
+              onChange={(e) => setFormData({ ...formData, noiSinh: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              placeholder="Nhập nơi sinh"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nguyên quán
+              </label>
+              <input
+                type="text"
+                value={formData.nguyenQuan}
+                onChange={(e) => setFormData({ ...formData, nguyenQuan: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Nhập nguyên quán"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Dân tộc
+              </label>
+              <input
+                type="text"
+                value={formData.danToc}
+                onChange={(e) => setFormData({ ...formData, danToc: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Ví dụ: Kinh, Tày..."
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Tôn giáo
+              </label>
+              <input
+                type="text"
+                value={formData.tonGiao}
+                onChange={(e) => setFormData({ ...formData, tonGiao: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Ví dụ: Không, Phật giáo..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Quốc tịch
+              </label>
+              <input
+                type="text"
+                value={formData.quocTich}
+                onChange={(e) => setFormData({ ...formData, quocTich: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Ví dụ: Việt Nam"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nghề nghiệp
+              </label>
+              <input
+                type="text"
+                value={formData.ngheNghiep}
+                onChange={(e) => setFormData({ ...formData, ngheNghiep: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Nhập nghề nghiệp"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nơi làm việc
+              </label>
+              <input
+                type="text"
+                value={formData.noiLamViec}
+                onChange={(e) => setFormData({ ...formData, noiLamViec: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Nhập nơi làm việc"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Ngày đăng ký thường trú
+              </label>
+              <input
+                type="date"
+                value={formData.ngayDangKyThuongTru}
+                onChange={(e) => setFormData({ ...formData, ngayDangKyThuongTru: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Địa chỉ thường trú trước đây
+              </label>
+              <input
+                type="text"
+                value={formData.diaChiThuongTruTruoc}
+                onChange={(e) => setFormData({ ...formData, diaChiThuongTruTruoc: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Nhập địa chỉ trước đây"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Ghi chú
+            </label>
+            <textarea
+              value={formData.ghiChu}
+              onChange={(e) => setFormData({ ...formData, ghiChu: e.target.value })}
+              rows={3}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              placeholder="Thông tin bổ sung nếu có..."
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50"
+            >
+              {isSubmitting ? "Đang gửi..." : "Gửi yêu cầu"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Hủy
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Modal thêm con sơ sinh
+interface AddNewbornModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: any) => Promise<void>;
+  householdInfo: Household | null;
+}
+
+function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbornModalProps) {
+  const [formData, setFormData] = useState({
+    householdId: "",
+    hoTen: "",
+    ngaySinh: "",
+    gioiTinh: "",
+    noiSinh: "",
+    nguyenQuan: "",
+    danToc: "",
+    tonGiao: "",
+    quocTich: "Việt Nam",
+    cccd: "",
+    ghiChu: "",
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen && householdInfo) {
+      setFormData(prev => ({
+        ...prev,
+        householdId: householdInfo.id.toString(),
+      }));
+    }
+  }, [isOpen, householdInfo]);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    // Validation
+    if (!formData.hoTen || !formData.ngaySinh || !formData.gioiTinh || !formData.noiSinh) {
+      setError("Vui lòng điền đầy đủ các trường bắt buộc");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await onSubmit(formData);
+    } catch (err: any) {
+      setError(err.message || "Có lỗi xảy ra");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[120] flex min-h-screen w-screen items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-900">
+            Thêm con sơ sinh
+          </h3>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            ✕
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Hộ khẩu */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Hộ khẩu <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={`${householdInfo?.soHoKhau || ""} - ${householdInfo?.diaChi || ""}`}
+              disabled
+              className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm"
+            />
+          </div>
+
+          {/* Thông tin trẻ sơ sinh */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Họ và tên <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.hoTen}
+                onChange={(e) => setFormData({ ...formData, hoTen: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Nhập họ và tên"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Ngày sinh <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                required
+                value={formData.ngaySinh}
+                onChange={(e) => setFormData({ ...formData, ngaySinh: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Giới tính <span className="text-red-500">*</span>
+              </label>
+              <select
+                required
+                value={formData.gioiTinh}
+                onChange={(e) => setFormData({ ...formData, gioiTinh: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option value="">Chọn giới tính</option>
+                <option value="nam">Nam</option>
+                <option value="nu">Nữ</option>
+                <option value="khac">Khác</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nơi sinh <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={formData.noiSinh}
+                onChange={(e) => setFormData({ ...formData, noiSinh: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Nhập nơi sinh"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Nguyên quán
+              </label>
+              <input
+                type="text"
+                value={formData.nguyenQuan}
+                onChange={(e) => setFormData({ ...formData, nguyenQuan: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Nhập nguyên quán"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Dân tộc
+              </label>
+              <input
+                type="text"
+                value={formData.danToc}
+                onChange={(e) => setFormData({ ...formData, danToc: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Ví dụ: Kinh, Tày..."
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Tôn giáo
+              </label>
+              <input
+                type="text"
+                value={formData.tonGiao}
+                onChange={(e) => setFormData({ ...formData, tonGiao: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Ví dụ: Không, Phật giáo..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Quốc tịch
+              </label>
+              <input
+                type="text"
+                value={formData.quocTich}
+                onChange={(e) => setFormData({ ...formData, quocTich: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                placeholder="Ví dụ: Việt Nam"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              CCCD/CMND (nếu có)
+            </label>
+            <input
+              type="text"
+              value={formData.cccd}
+              onChange={(e) => setFormData({ ...formData, cccd: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              placeholder="Nhập số CCCD nếu đã có"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Ghi chú
+            </label>
+            <textarea
+              value={formData.ghiChu}
+              onChange={(e) => setFormData({ ...formData, ghiChu: e.target.value })}
+              rows={3}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              placeholder="Thông tin bổ sung nếu có..."
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50"
+            >
+              {isSubmitting ? "Đang gửi..." : "Gửi yêu cầu"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Hủy
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

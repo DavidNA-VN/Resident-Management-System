@@ -623,6 +623,39 @@ CHECK (
   OR task IN ('hokhau_nhankhau', 'tamtru_tamvang', 'thongke', 'kiennghi')
 );
 
+-- 14.4) Bảng REQUESTS (Đơn yêu cầu)
+CREATE TABLE IF NOT EXISTS requests (
+    id SERIAL PRIMARY KEY,
+
+    "requesterUserId" INTEGER NOT NULL,
+
+    type VARCHAR(50) NOT NULL
+        CHECK (type IN ('ADD_NEWBORN')),
+
+    payload JSONB NOT NULL,
+
+    status VARCHAR(20) DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+
+    "rejectionReason" TEXT,
+
+    "reviewedBy" INTEGER,
+    "reviewedAt" TIMESTAMP,
+
+    "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_requests_requester
+        FOREIGN KEY ("requesterUserId") REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_requests_reviewer
+        FOREIGN KEY ("reviewedBy") REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_requests_requester ON requests("requesterUserId");
+CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
+CREATE INDEX IF NOT EXISTS idx_requests_type ON requests(type);
+CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests("createdAt");
+
 -- 14.3) Seed / update user mẫu (idempotent theo username)
 -- Lưu ý: password đang ở dạng plain text chỉ để demo
 
@@ -675,4 +708,5 @@ SET role = EXCLUDED.role,
     "fullName" = EXCLUDED."fullName",
     task = NULL,
     "isActive" = TRUE;
+
 

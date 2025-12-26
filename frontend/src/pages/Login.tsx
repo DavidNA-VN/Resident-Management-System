@@ -42,8 +42,13 @@ export default function Login() {
         );
         localStorage.setItem("isAuthenticated", "true");
         setModalType(null);
+
         // Redirect based on role
         if (response.data.user.role === "nguoi_dan") {
+          // Hiển thị thông báo nếu chưa liên kết
+          if (response.data.user.linked === false) {
+            alert(response.data.user.message || "Chưa có hồ sơ nhân khẩu. Vui lòng tạo yêu cầu hoặc chờ tổ trưởng duyệt.");
+          }
           navigate("/citizen/home");
         } else {
           navigate("/dashboard");

@@ -238,7 +238,7 @@ router.patch(
 
       // validate chủ hộ thuộc đúng hộ
       const check = await query(
-        `SELECT id FROM nhan_khau WHERE id = $1 AND "hoKhauId" = $2`,
+        `SELECT id, "quanHe" FROM nhan_khau WHERE id = $1 AND "hoKhauId" = $2`,
         [chuHoId, hoKhauId]
       );
       if (check.rowCount === 0) {
@@ -247,6 +247,34 @@ router.patch(
           error: {
             code: "INVALID_CHU_HO",
             message: "chuHoId không thuộc hộ khẩu này",
+          },
+        });
+      }
+
+      // Validation: Kiểm tra nhân khẩu được chọn có quanHe = "chu_ho" không
+      if (check.rows[0].quanHe !== "chu_ho") {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "INVALID_CHU_HO",
+            message: "Nhân khẩu được chọn phải có quan hệ là 'Chủ hộ'",
+          },
+        });
+      }
+
+      // Validation: Kiểm tra hộ khẩu đã có chủ hộ khác chưa
+      const existingChuHo = await query(
+        `SELECT id FROM nhan_khau 
+         WHERE "hoKhauId" = $1 AND "quanHe" = 'chu_ho' AND id != $2`,
+        [hoKhauId, chuHoId]
+      );
+
+      if (existingChuHo.rowCount > 0) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "DUPLICATE_CHU_HO",
+            message: "Hộ khẩu này đã có chủ hộ khác. Vui lòng sử dụng chức năng 'Đổi chủ hộ' nếu muốn thay đổi.",
           },
         });
       }
@@ -268,6 +296,137 @@ router.patch(
       }
 
       return res.json({ success: true, data: r.rows[0] });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * PATCH /ho-khau/:id/change-chu-ho
+ * Đổi chủ hộ: Chọn nhân khẩu mới làm chủ hộ, tự động hạ chủ hộ cũ xuống quan hệ khác
+ */
+router.patch(
+  "/ho-khau/:id/change-chu-ho",
+  requireAuth,
+  requireTask("hokhau_nhankhau"),
+  async (req, res, next) => {
+    try {
+      const hoKhauId = Number(req.params.id);
+      const { newChuHoId, oldChuHoNewQuanHe } = req.body as {
+        newChuHoId: number;
+        oldChuHoNewQuanHe?: string;
+      };
+
+      if (!hoKhauId || !newChuHoId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Missing hoKhauId or newChuHoId",
+          },
+        });
+      }
+
+      // Validate nhân khẩu mới thuộc đúng hộ khẩu
+      const newChuHoCheck = await query(
+        `SELECT id, "quanHe" FROM nhan_khau WHERE id = $1 AND "hoKhauId" = $2`,
+        [newChuHoId, hoKhauId]
+      );
+      if (newChuHoCheck.rowCount === 0) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "INVALID_CHU_HO",
+            message: "Nhân khẩu mới không thuộc hộ khẩu này",
+          },
+        });
+      }
+
+      // Lấy chủ hộ hiện tại
+      const currentChuHo = await query(
+        `SELECT nk.id, nk."quanHe" 
+         FROM nhan_khau nk
+         INNER JOIN ho_khau hk ON hk."chuHoId" = nk.id
+         WHERE hk.id = $1`,
+        [hoKhauId]
+      );
+
+      // Nếu không có chủ hộ hiện tại, kiểm tra xem có nhân khẩu nào có quanHe = chu_ho không
+      let oldChuHoId: number | null = null;
+      if (currentChuHo.rowCount === 0) {
+        const chuHoByQuanHe = await query(
+          `SELECT id FROM nhan_khau 
+           WHERE "hoKhauId" = $1 AND "quanHe" = 'chu_ho' AND id != $2`,
+          [hoKhauId, newChuHoId]
+        );
+        if (chuHoByQuanHe.rowCount > 0) {
+          oldChuHoId = chuHoByQuanHe.rows[0].id;
+        }
+      } else {
+        oldChuHoId = currentChuHo.rows[0].id;
+      }
+
+      // Nếu chọn cùng nhân khẩu làm chủ hộ mới
+      if (oldChuHoId === newChuHoId) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "INVALID_CHU_HO",
+            message: "Nhân khẩu này đã là chủ hộ",
+          },
+        });
+      }
+
+      // Bắt đầu transaction: Đổi chủ hộ và hạ chủ hộ cũ
+      // 1. Hạ chủ hộ cũ xuống quan hệ mới (nếu có)
+      if (oldChuHoId) {
+        const newQuanHe =
+          oldChuHoNewQuanHe || "vo_chong"; // Mặc định là "Vợ/Chồng" nếu không chỉ định
+        const allowedQuanHe = [
+          "vo_chong",
+          "con",
+          "cha_me",
+          "anh_chi_em",
+          "ong_ba",
+          "chau",
+          "khac",
+        ];
+        if (!allowedQuanHe.includes(newQuanHe)) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "Quan hệ mới cho chủ hộ cũ không hợp lệ",
+            },
+          });
+        }
+
+        await query(
+          `UPDATE nhan_khau SET "quanHe" = $1 WHERE id = $2`,
+          [newQuanHe, oldChuHoId]
+        );
+      }
+
+      // 2. Đặt nhân khẩu mới làm chủ hộ
+      await query(
+        `UPDATE nhan_khau SET "quanHe" = 'chu_ho' WHERE id = $1`,
+        [newChuHoId]
+      );
+
+      // 3. Cập nhật chuHoId trong ho_khau
+      await query(
+        `UPDATE ho_khau SET "chuHoId" = $1 WHERE id = $2`,
+        [newChuHoId, hoKhauId]
+      );
+
+      // Lấy lại thông tin hộ khẩu sau khi cập nhật
+      const updatedHoKhau = await query(
+        `SELECT * FROM ho_khau WHERE id = $1`,
+        [hoKhauId]
+      );
+
+      return res.json({ success: true, data: updatedHoKhau.rows[0] });
     } catch (err) {
       next(err);
     }

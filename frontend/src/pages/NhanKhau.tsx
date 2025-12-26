@@ -1,5 +1,7 @@
 import { useState, useEffect, FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { apiService } from "../services/api";
+import { formatDateForInput, formatFromYMD, normalizeDateOnly } from "../utils/date";
 
 interface HoKhau {
   id: number;
@@ -28,6 +30,7 @@ interface NhanKhau {
   ngheNghiep?: string;
   noiLamViec?: string;
   hoKhauId: number;
+  isChuHo?: boolean; // Computed field from backend for backward compatibility
 }
 
 interface NhanKhauForm {
@@ -53,6 +56,7 @@ interface NhanKhauForm {
 }
 
 export default function NhanKhau() {
+  const [searchParams] = useSearchParams();
   const [hoKhauList, setHoKhauList] = useState<HoKhau[]>([]);
   const [selectedHoKhauId, setSelectedHoKhauId] = useState<number | null>(null);
   const [nhanKhauList, setNhanKhauList] = useState<NhanKhau[]>([]);
@@ -60,6 +64,7 @@ export default function NhanKhau() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showActivateModal, setShowActivateModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showChangeChuHoModal, setShowChangeChuHoModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
@@ -107,9 +112,24 @@ export default function NhanKhau() {
     setToast({ type, message });
   };
 
+  // Current user (from localStorage) to control UI permissions (người dân cannot set 'chu_ho')
+  const currentUser = localStorage.getItem("userInfo")
+    ? (JSON.parse(localStorage.getItem("userInfo") || "null") as any)
+    : null;
+  const isCitizen = currentUser?.role === "nguoi_dan";
+
   const normalizeField = (value: string) => {
     const trimmed = value?.trim?.() ?? "";
     return trimmed === "" ? null : trimmed;
+  };
+
+  // Helper function to check if a person is the head of household
+  const isChuHo = (nhanKhau: NhanKhau) => {
+    // Check isChuHo field first (from backend computed field)
+    if (nhanKhau.isChuHo === true) return true;
+    // Fallback to quanHe check
+    const normalized = String(nhanKhau.quanHe || "").trim().toLowerCase();
+    return normalized === "chu_ho" || normalized === "chủ hộ";
   };
 
   useEffect(() => {
@@ -121,6 +141,21 @@ export default function NhanKhau() {
   useEffect(() => {
     loadHoKhauList();
   }, []);
+
+  // Handle householdId from query parameter
+  useEffect(() => {
+    if (hoKhauList.length > 0) {
+      const householdIdParam = searchParams.get('householdId');
+      if (householdIdParam) {
+        const householdId = parseInt(householdIdParam);
+        if (hoKhauList.some(hk => hk.id === householdId)) {
+          setSelectedHoKhauId(householdId);
+          // Show a toast message to guide the user
+          showToast("Vui lòng chọn nhân khẩu để sửa", "success");
+        }
+      }
+    }
+  }, [hoKhauList, searchParams]);
 
   useEffect(() => {
     if (selectedHoKhauId) {
@@ -149,19 +184,38 @@ export default function NhanKhau() {
 
   const loadNhanKhauList = async (hoKhauId: number) => {
     setIsLoading(true);
+    setError(null); // Clear previous errors
     try {
       const response = await apiService.getNhanKhauList(hoKhauId);
       if (response.success) {
-        setNhanKhauList(response.data);
+        const members = [...response.data];
+        members.sort((a, b) => {
+          const aIsHead = isChuHo(a);
+          const bIsHead = isChuHo(b);
+          if (aIsHead && !bIsHead) return -1;
+          if (!aIsHead && bIsHead) return 1;
+          const aName = (a.hoTen || "").trim();
+          const bName = (b.hoTen || "").trim();
+          return aName.localeCompare(bName, "vi", { sensitivity: "base" });
+        });
+        setNhanKhauList(members);
         const hasChuHo = response.data.some(
-          (nk: NhanKhau) => nk.quanHe === "chu_ho"
+          (nk: NhanKhau) => isChuHo(nk)
         );
         setHoKhauHeadStatus((prev) => ({ ...prev, [hoKhauId]: hasChuHo }));
+      } else {
+        // API returned success=false, show error but keep existing list
+        const message = "Lỗi khi tải danh sách nhân khẩu";
+        setError(message);
+        showToast(message, "error");
+        // Don't clear the list - keep existing data
       }
     } catch (err: any) {
       const message = err.error?.message || "Lỗi khi tải danh sách nhân khẩu";
       setError(message);
       showToast(message, "error");
+      // On network/server errors, don't clear the list - keep existing data
+      // Only clear if it's a legitimate "no data" scenario
     } finally {
       setIsLoading(false);
     }
@@ -178,8 +232,19 @@ export default function NhanKhau() {
       const response = await apiService.getNhanKhauList(hoKhauId);
 
       if (response.success) {
-        const hasChuHo = response.data.some(
-          (nk: NhanKhau) => nk.quanHe === "chu_ho"
+        const members = [...response.data];
+        members.sort((a, b) => {
+          const aIsHead = isChuHo(a);
+          const bIsHead = isChuHo(b);
+          if (aIsHead && !bIsHead) return -1;
+          if (!aIsHead && bIsHead) return 1;
+          const aName = (a.hoTen || "").trim();
+          const bName = (b.hoTen || "").trim();
+          return aName.localeCompare(bName, "vi", { sensitivity: "base" });
+        });
+
+        const hasChuHo = members.some(
+          (nk: NhanKhau) => isChuHo(nk)
         );
 
         setHoKhauHeadStatus((prev) => ({ ...prev, [hoKhauId]: hasChuHo }));
@@ -246,7 +311,7 @@ export default function NhanKhau() {
     try {
       const hoKhauIdNumber = Number(formData.hoKhauId);
 
-      if (formData.quanHe === "chu_ho") {
+      if (isChuHo({ quanHe: formData.quanHe } as NhanKhau)) {
         const hasChuHo = await ensureHoKhauHasChuHo(hoKhauIdNumber);
 
         if (hasChuHo) {
@@ -262,23 +327,22 @@ export default function NhanKhau() {
         hoTen: normalizeField(formData.hoTen)!,
         biDanh: normalizeField(formData.biDanh) || undefined,
         cccd: normalizeField(formData.cccd) || undefined,
-        ngayCapCCCD: normalizeField(formData.ngayCapCCCD) || undefined,
+        ngayCapCCCD: normalizeDateOnly(formData.ngayCapCCCD) || undefined,
         noiCapCCCD: normalizeField(formData.noiCapCCCD) || undefined,
-        ngaySinh: normalizeField(formData.ngaySinh) || undefined,
+        ngaySinh: normalizeDateOnly(formData.ngaySinh) || undefined,
         gioiTinh:
           formData.gioiTinh === "nam" ||
           formData.gioiTinh === "nu" ||
           formData.gioiTinh === "khac"
             ? (formData.gioiTinh as "nam" | "nu" | "khac")
-            : null,
+            : undefined,
         noiSinh: normalizeField(formData.noiSinh) || undefined,
         nguyenQuan: normalizeField(formData.nguyenQuan) || undefined,
         danToc: normalizeField(formData.danToc) || undefined,
         tonGiao: normalizeField(formData.tonGiao) || undefined,
         quocTich: normalizeField(formData.quocTich) || undefined,
         quanHe: formData.quanHe as any,
-        ngayDangKyThuongTru:
-          normalizeField(formData.ngayDangKyThuongTru) || undefined,
+        ngayDangKyThuongTru: normalizeDateOnly(formData.ngayDangKyThuongTru) || undefined,
         diaChiThuongTruTruoc:
           normalizeField(formData.diaChiThuongTruTruoc) || undefined,
         ngheNghiep: normalizeField(formData.ngheNghiep) || undefined,
@@ -338,9 +402,9 @@ export default function NhanKhau() {
           hoTen: nk.hoTen || "",
           biDanh: nk.biDanh || "",
           cccd: nk.cccd || "",
-          ngayCapCCCD: nk.ngayCapCCCD ? nk.ngayCapCCCD.substring(0, 10) : "",
+          ngayCapCCCD: formatDateForInput(nk.ngayCapCCCD),
           noiCapCCCD: nk.noiCapCCCD || "",
-          ngaySinh: nk.ngaySinh ? nk.ngaySinh.substring(0, 10) : "",
+          ngaySinh: formatDateForInput(nk.ngaySinh),
           gioiTinh: nk.gioiTinh || "",
           noiSinh: nk.noiSinh || "",
           nguyenQuan: nk.nguyenQuan || "",
@@ -348,18 +412,12 @@ export default function NhanKhau() {
           tonGiao: nk.tonGiao || "",
           quocTich: nk.quocTich || "Việt Nam",
           quanHe: nk.quanHe || "",
-          ngayDangKyThuongTru: nk.ngayDangKyThuongTru
-            ? nk.ngayDangKyThuongTru.substring(0, 10)
-            : "",
+          ngayDangKyThuongTru: formatDateForInput(nk.ngayDangKyThuongTru),
           diaChiThuongTruTruoc: nk.diaChiThuongTruTruoc || "",
           ngheNghiep: nk.ngheNghiep || "",
           noiLamViec: nk.noiLamViec || "",
           ghiChu: nk.ghiChu || "",
         });
-      } else {
-        setViewError(
-          res.error?.message || "Không lấy được thông tin nhân khẩu"
-        );
       }
     } catch (err: any) {
       setViewError(err.error?.message || "Lỗi khi tải thông tin nhân khẩu");
@@ -394,6 +452,22 @@ export default function NhanKhau() {
         return;
       }
 
+      // Validation: Nếu đang set quanHe = "chu_ho", kiểm tra hộ khẩu đã có chủ hộ chưa
+      if (isChuHo({ quanHe: viewForm.quanHe } as NhanKhau) && viewingNhanKhau) {
+        const hoKhauId = viewingNhanKhau.hoKhauId;
+        const hasChuHo = await ensureHoKhauHasChuHo(hoKhauId);
+        
+        // Nếu hộ khẩu đã có chủ hộ và nhân khẩu hiện tại không phải chủ hộ
+        if (hasChuHo && !isChuHo(viewingNhanKhau)) {
+          const message =
+            "Hộ khẩu này đã có chủ hộ. Không thể đặt nhân khẩu này làm chủ hộ. Vui lòng sử dụng chức năng 'Đổi chủ hộ' nếu muốn thay đổi.";
+          setViewError(message);
+          showToast(message, "error");
+          setViewSaving(false);
+          return;
+        }
+      }
+
       const optionalKeys: (keyof NhanKhauForm)[] = [
         "cccd",
         "ngheNghiep",
@@ -417,41 +491,43 @@ export default function NhanKhau() {
       }
 
       const payload = {
-        hoTen: normalizeField(viewForm.hoTen),
+        hoTen: normalizeField(viewForm.hoTen) || undefined,
         biDanh: normalizeField(viewForm.biDanh) || undefined,
-        cccd: normalizeField(viewForm.cccd),
-        ngayCapCCCD: normalizeField(viewForm.ngayCapCCCD),
-        noiCapCCCD: normalizeField(viewForm.noiCapCCCD),
-        ngaySinh: normalizeField(viewForm.ngaySinh),
+        cccd: normalizeField(viewForm.cccd) || undefined,
+        ngayCapCCCD: normalizeDateOnly(viewForm.ngayCapCCCD) || undefined,
+        noiCapCCCD: normalizeField(viewForm.noiCapCCCD) || undefined,
+        ngaySinh: normalizeDateOnly(viewForm.ngaySinh) || undefined,
         gioiTinh:
           viewForm.gioiTinh === "nam" ||
           viewForm.gioiTinh === "nu" ||
           viewForm.gioiTinh === "khac"
             ? (viewForm.gioiTinh as "nam" | "nu" | "khac")
-            : null,
-        noiSinh: normalizeField(viewForm.noiSinh),
-        nguyenQuan: normalizeField(viewForm.nguyenQuan),
-        danToc: normalizeField(viewForm.danToc),
-        tonGiao: normalizeField(viewForm.tonGiao),
-        quocTich: normalizeField(viewForm.quocTich),
-        quanHe: normalizeField(viewForm.quanHe) as any,
-        ngayDangKyThuongTru: normalizeField(viewForm.ngayDangKyThuongTru),
-        diaChiThuongTruTruoc: normalizeField(viewForm.diaChiThuongTruTruoc),
-        ngheNghiep: normalizeField(viewForm.ngheNghiep),
-        noiLamViec: normalizeField(viewForm.noiLamViec),
-        ghiChu: normalizeField(viewForm.ghiChu),
+            : undefined,
+        noiSinh: normalizeField(viewForm.noiSinh) || undefined,
+        nguyenQuan: normalizeField(viewForm.nguyenQuan) || undefined,
+        danToc: normalizeField(viewForm.danToc) || undefined,
+        tonGiao: normalizeField(viewForm.tonGiao) || undefined,
+        quocTich: normalizeField(viewForm.quocTich) || undefined,
+        quanHe: (normalizeField(viewForm.quanHe) as any) || undefined,
+        ngayDangKyThuongTru: normalizeDateOnly(viewForm.ngayDangKyThuongTru) || undefined,
+        diaChiThuongTruTruoc:
+          normalizeField(viewForm.diaChiThuongTruTruoc) || undefined,
+        ngheNghiep: normalizeField(viewForm.ngheNghiep) || undefined,
+        noiLamViec: normalizeField(viewForm.noiLamViec) || undefined,
       };
 
-      const res = await apiService.updateNhanKhau(id, payload);
-      if (res.success) {
-        showToast("Cập nhật nhân khẩu thành công!", "success");
-        setShowViewModal(false);
-        setViewingNhanKhau(null);
-        if (selectedHoKhauId) {
-          loadNhanKhauList(selectedHoKhauId);
+      try {
+        const res = await apiService.updateNhanKhau(id, payload);
+        if (res.success) {
+          showToast("Cập nhật nhân khẩu thành công!", "success");
+          setShowViewModal(false);
+          setViewingNhanKhau(null);
+          if (selectedHoKhauId) {
+            loadNhanKhauList(selectedHoKhauId);
+          }
         }
-      } else {
-        const message = res.error?.message || "Không thể cập nhật nhân khẩu";
+      } catch (err: any) {
+        const message = err.error?.message || "Lỗi khi cập nhật nhân khẩu";
         setViewError(message);
         showToast(message, "error");
       }
@@ -488,8 +564,50 @@ export default function NhanKhau() {
     }
   };
 
+  const handleChangeChuHo = async (
+    newChuHoId: number,
+    oldChuHoNewQuanHe?: string
+  ) => {
+    if (!selectedHoKhauId) return;
+
+    setError(null);
+    setToast(null);
+    setIsLoading(true);
+
+    try {
+      const response = await apiService.changeChuHo(
+        selectedHoKhauId,
+        newChuHoId,
+        oldChuHoNewQuanHe
+      );
+      if (response.success) {
+        showToast("Đổi chủ hộ thành công!", "success");
+        setShowChangeChuHoModal(false);
+        loadHoKhauList();
+        loadNhanKhauList(selectedHoKhauId);
+      }
+    } catch (err: any) {
+      const message = err.error?.message || "Lỗi khi đổi chủ hộ";
+      setError(message);
+      showToast(message, "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Always derive a sorted list for rendering so Chủ hộ is shown first
+  const sortedNhanKhauList = [...nhanKhauList].sort((a, b) => {
+    const aIsHead = isChuHo(a);
+    const bIsHead = isChuHo(b);
+    if (aIsHead && !bIsHead) return -1;
+    if (!aIsHead && bIsHead) return 1;
+    const aName = (a.hoTen || "").trim();
+    const bName = (b.hoTen || "").trim();
+    return aName.localeCompare(bName, "vi", { sensitivity: "base" });
+  });
+
   const selectedHoKhau = hoKhauList.find((hk) => hk.id === selectedHoKhauId);
-  const chuHoCandidates = nhanKhauList.filter((nk) => nk.quanHe === "chu_ho");
+  const chuHoCandidates = sortedNhanKhauList.filter((nk) => isChuHo(nk));
 
   const quanHeOptions = [
     { value: "chu_ho", label: "Chủ hộ" },
@@ -526,7 +644,7 @@ export default function NhanKhau() {
   }, [showCreateForm, formData.hoKhauId]);
 
   useEffect(() => {
-    if (hasChuHoForForm && formData.quanHe === "chu_ho") {
+    if (hasChuHoForForm && isChuHo({ quanHe: formData.quanHe } as NhanKhau)) {
       setFormData((prev) => ({ ...prev, quanHe: "" }));
     }
   }, [hasChuHoForForm, formData.quanHe]);
@@ -802,12 +920,38 @@ export default function NhanKhau() {
                       className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                       <option value="">Chọn quan hệ</option>
-                      {quanHeOptions.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
+                      {quanHeOptions.map((opt) => {
+                        const isChuHoOption = opt.value === "chu_ho";
+                        const isCurrentChuHo =
+                          viewingNhanKhau ? isChuHo(viewingNhanKhau) : false;
+                        const disabledChuHo =
+                          isChuHoOption &&
+                          !isCurrentChuHo &&
+                          selectedHoKhauId !== null &&
+                          hoKhauHeadStatus[selectedHoKhauId];
+                        // additionally hide/disable option for plain citizens
+                        const disabledForCitizen = isChuHoOption && isCitizen;
+
+                        return (
+                          <option
+                            key={opt.value}
+                            value={opt.value}
+                            disabled={disabledChuHo || disabledForCitizen}
+                          >
+                            {opt.label}
+                          </option>
+                        );
+                      })}
                     </select>
+                    {viewingNhanKhau &&
+                      !isChuHo(viewingNhanKhau) &&
+                      selectedHoKhauId !== null &&
+                      hoKhauHeadStatus[selectedHoKhauId] && (
+                        <p className="mt-1 text-xs text-amber-600">
+                          Hộ khẩu này đã có chủ hộ. Vui lòng sử dụng chức năng
+                          "Đổi chủ hộ" nếu muốn thay đổi.
+                        </p>
+                      )}
                   </label>
                 </div>
 
@@ -929,6 +1073,29 @@ export default function NhanKhau() {
                 className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600"
               >
                 Kích hoạt hộ khẩu
+              </button>
+            </div>
+          </div>
+        )}
+
+      {/* Change Chu Ho Button */}
+      {selectedHoKhau &&
+        selectedHoKhau.trangThai === "active" &&
+        chuHoCandidates.length > 0 &&
+        nhanKhauList.filter((nk) => nk.quanHe !== "chu_ho").length > 0 && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-blue-900">Đổi chủ hộ</p>
+                <p className="mt-1 text-sm text-blue-700">
+                  Bạn có thể thay đổi chủ hộ cho hộ khẩu này.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowChangeChuHoModal(true)}
+                className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+              >
+                Đổi chủ hộ
               </button>
             </div>
           </div>
@@ -1161,12 +1328,13 @@ export default function NhanKhau() {
                       const disabledChuHo =
                         isChuHoOption &&
                         (isCheckingCurrentHoKhau || hasChuHoForForm);
+                      const disabledForCitizen = isChuHoOption && isCitizen;
 
                       return (
                         <option
                           key={opt.value}
                           value={opt.value}
-                          disabled={disabledChuHo}
+                          disabled={disabledChuHo || disabledForCitizen}
                         >
                           {opt.label}
                         </option>
@@ -1303,6 +1471,71 @@ export default function NhanKhau() {
         </div>
       )}
 
+      {/* Change Chu Ho Modal */}
+      {showChangeChuHoModal && selectedHoKhau && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto overflow-hidden modal-scroll">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Đổi chủ hộ</h2>
+              <button
+                onClick={() => setShowChangeChuHoModal(false)}
+                className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="mb-4 text-sm text-gray-600">
+              Chọn nhân khẩu mới làm chủ hộ cho hộ khẩu{" "}
+              <strong>{selectedHoKhau.soHoKhau}</strong>
+            </p>
+
+            <p className="mb-4 text-xs text-amber-600">
+              Chủ hộ hiện tại sẽ được tự động chuyển sang quan hệ khác (mặc định
+              là "Vợ/Chồng").
+            </p>
+
+            <div className="space-y-2 mb-6">
+              {sortedNhanKhauList
+                .filter((nk) => nk.quanHe !== "chu_ho")
+                .map((nk) => (
+                  <button
+                    key={nk.id}
+                    onClick={() => handleChangeChuHo(nk.id)}
+                    disabled={isLoading}
+                    className="w-full rounded-lg border border-gray-200 bg-white p-3 text-left hover:bg-gray-50 hover:border-blue-300 transition-all disabled:opacity-50"
+                  >
+                    <div className="font-medium text-gray-900">{nk.hoTen}</div>
+                    {nk.cccd && (
+                      <div className="text-xs text-gray-500">
+                        CCCD: {nk.cccd}
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-500">
+                      {quanHeOptions.find((opt) => opt.value === nk.quanHe)
+                        ?.label || nk.quanHe}
+                    </div>
+                  </button>
+                ))}
+            </div>
+
+            {sortedNhanKhauList.filter((nk) => nk.quanHe !== "chu_ho").length ===
+              0 && (
+              <p className="mb-4 text-sm text-gray-500 text-center">
+                Không có nhân khẩu nào khác để chọn làm chủ hộ.
+              </p>
+            )}
+
+            <button
+              onClick={() => setShowChangeChuHoModal(false)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Hủy
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* List */}
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 p-4">
@@ -1352,16 +1585,16 @@ export default function NhanKhau() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {nhanKhauList.map((nk) => (
+                {sortedNhanKhauList.map((nk) => (
                   <tr
                     key={nk.id}
                     className={`hover:bg-gray-50 ${
-                      nk.quanHe === "chu_ho" ? "bg-blue-50/50" : ""
+                      isChuHo(nk) ? "bg-blue-50/50" : ""
                     }`}
                   >
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       {nk.hoTen}
-                      {nk.quanHe === "chu_ho" && (
+                      {isChuHo(nk) && (
                         <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
                           Chủ hộ
                         </span>
@@ -1385,7 +1618,7 @@ export default function NhanKhau() {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {nk.ngaySinh
-                        ? new Date(nk.ngaySinh).toLocaleDateString("vi-VN")
+                        ? formatFromYMD(nk.ngaySinh)
                         : "-"}
                     </td>
                     <td className="px-4 py-3 text-right text-sm text-gray-600 space-x-2">

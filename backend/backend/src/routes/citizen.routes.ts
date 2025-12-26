@@ -6,24 +6,42 @@ const router = Router();
 
 /**
  * GET /citizen/household
- * Lấy hộ khẩu của người dân hiện tại (dựa vào userId trong nhan_khau)
+ * Lấy hộ khẩu của người dân hiện tại (dựa vào personId trong users)
  */
 router.get("/citizen/household", requireAuth, requireRole(["nguoi_dan"]), async (req, res, next) => {
   try {
     const userId = req.user!.id;
 
-    // Tìm nhân khẩu của user này
-    const nhanKhauResult = await query(
-      `SELECT id, "hoKhauId" FROM nhan_khau WHERE "userId" = $1 LIMIT 1`,
+    // Kiểm tra user có linked không
+    const userResult = await query(
+      `SELECT "personId" FROM users WHERE id = $1`,
       [userId]
     );
 
-    if (nhanKhauResult.rowCount === 0) {
-      return res.status(404).json({
+    if (userResult.rowCount === 0 || !userResult.rows[0].personId) {
+      return res.status(200).json({
         success: false,
         error: {
-          code: "NOT_FOUND",
-          message: "Không tìm thấy nhân khẩu liên kết với tài khoản này",
+          code: "NOT_LINKED",
+          message: "Tài khoản chưa liên kết với hồ sơ nhân khẩu",
+        },
+      });
+    }
+
+    const personId = userResult.rows[0].personId;
+
+    // Tìm nhân khẩu của user này
+    const nhanKhauResult = await query(
+      `SELECT id, "hoKhauId" FROM nhan_khau WHERE id = $1`,
+      [personId]
+    );
+
+    if (nhanKhauResult.rowCount === 0) {
+      return res.status(200).json({
+        success: false,
+        error: {
+          code: "NOT_LINKED",
+          message: "Hồ sơ nhân khẩu không tồn tại",
         },
       });
     }
@@ -51,10 +69,20 @@ router.get("/citizen/household", requireAuth, requireRole(["nguoi_dan"]), async 
 
     // Lấy danh sách nhân khẩu trong hộ
     const membersResult = await query(
-      `SELECT * FROM nhan_khau WHERE "hoKhauId" = $1 ORDER BY 
-        CASE "quanHe" 
-          WHEN 'chu_ho' THEN 1 
-          ELSE 2 
+      `SELECT
+        id, "hoTen", "biDanh", cccd,
+        "ngayCapCCCD"::text AS "ngayCapCCCD",
+        "noiCapCCCD",
+        "ngaySinh"::text AS "ngaySinh",
+        "gioiTinh", "noiSinh", "nguyenQuan", "danToc", "tonGiao", "quocTich",
+        "hoKhauId", "quanHe",
+        "ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
+        "diaChiThuongTruTruoc", "ngheNghiep", "noiLamViec", "ghiChu",
+        "trangThai", "userId", "createdAt", "updatedAt"
+       FROM nhan_khau WHERE "hoKhauId" = $1 ORDER BY
+        CASE "quanHe"
+          WHEN 'chu_ho' THEN 1
+          ELSE 2
         END, "createdAt" ASC`,
       [hoKhauId]
     );
@@ -63,7 +91,17 @@ router.get("/citizen/household", requireAuth, requireRole(["nguoi_dan"]), async 
     let chuHo = null;
     if (hoKhau.chuHoId) {
       const chuHoResult = await query(
-        `SELECT * FROM nhan_khau WHERE id = $1`,
+        `SELECT
+          id, "hoTen", "biDanh", cccd,
+          "ngayCapCCCD"::text AS "ngayCapCCCD",
+          "noiCapCCCD",
+          "ngaySinh"::text AS "ngaySinh",
+          "gioiTinh", "noiSinh", "nguyenQuan", "danToc", "tonGiao", "quocTich",
+          "hoKhauId", "quanHe",
+          "ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
+          "diaChiThuongTruTruoc", "ngheNghiep", "noiLamViec", "ghiChu",
+          "trangThai", "userId", "createdAt", "updatedAt"
+         FROM nhan_khau WHERE id = $1`,
         [hoKhau.chuHoId]
       );
       if (chuHoResult.rowCount > 0) {
@@ -84,6 +122,28 @@ router.get("/citizen/household", requireAuth, requireRole(["nguoi_dan"]), async 
   }
 });
 
-export default router;
+/**
+ * GET /citizen/households
+ * Lấy danh sách hộ khẩu để người dân chọn khi tạo request
+ */
+router.get("/citizen/households", async (req, res, next) => {
+  try {
+    // Lấy danh sách hộ khẩu active (có thể filter theo điều kiện)
+    const householdsResult = await query(
+      `SELECT id, "soHoKhau", diaChi, tinhThanh, quanHuyen, phuongXa, duongPho, soNha, trangThai
+       FROM ho_khau
+       WHERE trangThai = 'active'
+       ORDER BY "soHoKhau" ASC`
+    );
 
+    return res.json({
+      success: true,
+      data: householdsResult.rows,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;
 

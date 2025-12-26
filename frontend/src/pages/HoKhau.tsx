@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiService } from "../services/api";
+import { formatDateForInput, formatFromYMD } from "../utils/date";
 
 interface HoKhau {
   id: number;
@@ -26,6 +28,7 @@ interface NhanKhau {
   gioiTinh?: string;
   ngaySinh?: string;
   hoKhauId?: number;
+  ghiChu?: string;
 }
 
 type NhanKhauFull = NhanKhau & {
@@ -55,6 +58,7 @@ const quanHeLabel: Record<string, string> = {
 };
 
 export default function HoKhau() {
+  const navigate = useNavigate();
   const [hoKhauList, setHoKhauList] = useState<HoKhau[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -98,8 +102,15 @@ export default function HoKhau() {
     useState<NhanKhauFull | null>(null);
   const [showMemberViewModal, setShowMemberViewModal] = useState(false);
   const [memberViewLoading, setMemberViewLoading] = useState(false);
-  const [memberViewSaving, setMemberViewSaving] = useState(false);
   const [memberViewError, setMemberViewError] = useState<string | null>(null);
+  // Read-only mode for the member view modal. When true, fields are disabled and no save button is shown.
+  const [memberViewReadOnly, setMemberViewReadOnly] = useState(true);
+
+  // Current user (from localStorage) to decide if edit action should be shown
+  const currentUser = localStorage.getItem("userInfo")
+    ? (JSON.parse(localStorage.getItem("userInfo") || "null") as any)
+    : null;
+  const canEditMember = currentUser?.role !== "nguoi_dan";
 
   const [formData, setFormData] = useState({
     soHoKhau: "",
@@ -187,7 +198,14 @@ export default function HoKhau() {
     setMemberViewError(null);
   };
 
+  const navigateToNhanKhauPage = (hoKhauId: number) => {
+    // Navigate to nhan-khau page with householdId as query parameter
+    navigate(`/nhan-khau?householdId=${hoKhauId}`);
+  };
+
   const openViewNhanKhau = async (id: number) => {
+    // Always set to read-only when viewing from Ho Khau page
+    setMemberViewReadOnly(true);
     setMemberViewError(null);
     setMemberViewLoading(true);
     setShowMemberViewModal(true);
@@ -200,16 +218,12 @@ export default function HoKhau() {
           ...emptyMemberFull,
           ...nk,
           hoKhauId: nk.hoKhauId,
-          ngayCapCCCD: nk.ngayCapCCCD ? nk.ngayCapCCCD.substring(0, 10) : "",
-          ngayDangKyThuongTru: nk.ngayDangKyThuongTru
-            ? nk.ngayDangKyThuongTru.substring(0, 10)
-            : "",
-          ngaySinh: nk.ngaySinh ? nk.ngaySinh.substring(0, 10) : "",
+          ngayCapCCCD: formatDateForInput(nk.ngayCapCCCD),
+          ngayDangKyThuongTru: formatDateForInput(nk.ngayDangKyThuongTru),
+          ngaySinh: formatDateForInput(nk.ngaySinh),
         });
       } else {
-        setMemberViewError(
-          res.error?.message || "Không lấy được thông tin nhân khẩu"
-        );
+        setMemberViewError("Không lấy được thông tin nhân khẩu");
       }
     } catch (err: any) {
       setMemberViewError(
@@ -220,55 +234,6 @@ export default function HoKhau() {
     }
   };
 
-  const handleUpdateNhanKhauFull = async () => {
-    if (!viewingNhanKhauDetail) return;
-    setMemberViewError(null);
-    setMemberViewSaving(true);
-    try {
-      const payload = {
-        hoTen: memberViewForm.hoTen || undefined,
-        biDanh: memberViewForm.biDanh || undefined,
-        cccd: memberViewForm.cccd || undefined,
-        ngayCapCCCD: memberViewForm.ngayCapCCCD || undefined,
-        noiCapCCCD: memberViewForm.noiCapCCCD || undefined,
-        ngaySinh: memberViewForm.ngaySinh || undefined,
-        gioiTinh:
-          memberViewForm.gioiTinh === "nam" ||
-          memberViewForm.gioiTinh === "nu" ||
-          memberViewForm.gioiTinh === "khac"
-            ? memberViewForm.gioiTinh
-            : undefined,
-        noiSinh: memberViewForm.noiSinh || undefined,
-        nguyenQuan: memberViewForm.nguyenQuan || undefined,
-        danToc: memberViewForm.danToc || undefined,
-        tonGiao: memberViewForm.tonGiao || undefined,
-        quocTich: memberViewForm.quocTich || undefined,
-        quanHe: (memberViewForm.quanHe || undefined) as any,
-        ngayDangKyThuongTru: memberViewForm.ngayDangKyThuongTru || undefined,
-        diaChiThuongTruTruoc: memberViewForm.diaChiThuongTruTruoc || undefined,
-        ngheNghiep: memberViewForm.ngheNghiep || undefined,
-        noiLamViec: memberViewForm.noiLamViec || undefined,
-      };
-
-      const res = await apiService.updateNhanKhau(
-        viewingNhanKhauDetail.id,
-        payload
-      );
-      if (res.success) {
-        if (viewingHoKhau) await loadMembers(viewingHoKhau.id);
-        setShowMemberViewModal(false);
-        setViewingNhanKhauDetail(null);
-      } else {
-        setMemberViewError(
-          res.error?.message || "Không thể cập nhật nhân khẩu"
-        );
-      }
-    } catch (err: any) {
-      setMemberViewError(err.error?.message || "Lỗi khi cập nhật nhân khẩu");
-    } finally {
-      setMemberViewSaving(false);
-    }
-  };
 
   const openEditHousehold = async (hoKhau: HoKhau) => {
     setEditingHoKhau(hoKhau);
@@ -288,7 +253,7 @@ export default function HoKhau() {
           phuongXa: data.phuongXa || "",
           duongPho: data.duongPho || "",
           soNha: data.soNha || "",
-          ngayCap: data.ngayCap ? data.ngayCap.substring(0, 10) : "",
+          ngayCap: formatDateForInput(data.ngayCap),
           ghiChu: data.ghiChu || "",
         });
       }
@@ -344,7 +309,7 @@ export default function HoKhau() {
         // Tải lại danh sách để đồng bộ với server
         await loadHoKhauList();
       } else {
-        setError(response?.error?.message || "Không thể cập nhật hộ khẩu");
+        setError("Không thể cập nhật hộ khẩu");
       }
     } catch (err: any) {
       setError(err.error?.message || "Lỗi khi cập nhật hộ khẩu");
@@ -449,7 +414,7 @@ export default function HoKhau() {
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">
-                  Xem / Sửa nhân khẩu
+                  Xem nhân khẩu
                 </h3>
                 <p className="text-sm text-gray-500">
                   Hộ khẩu: {viewingNhanKhauDetail.hoKhauId}
@@ -476,13 +441,7 @@ export default function HoKhau() {
             {memberViewLoading ? (
               <div className="p-6 text-center text-gray-500">Đang tải...</div>
             ) : (
-              <form
-                className="space-y-4"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleUpdateNhanKhauFull();
-                }}
-              >
+              <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-4">
                   <label className="block text-sm font-medium text-gray-700">
                     Họ và tên
@@ -495,7 +454,8 @@ export default function HoKhau() {
                           hoTen: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                       required
                     />
                   </label>
@@ -510,7 +470,8 @@ export default function HoKhau() {
                           cccd: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -524,7 +485,8 @@ export default function HoKhau() {
                           biDanh: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
@@ -541,7 +503,8 @@ export default function HoKhau() {
                           ngayCapCCCD: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -555,7 +518,8 @@ export default function HoKhau() {
                           noiCapCCCD: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -569,7 +533,8 @@ export default function HoKhau() {
                           ngayDangKyThuongTru: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
@@ -586,7 +551,8 @@ export default function HoKhau() {
                           ngaySinh: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -599,7 +565,8 @@ export default function HoKhau() {
                           gioiTinh: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     >
                       <option value="">Chọn giới tính</option>
                       <option value="nam">Nam</option>
@@ -618,7 +585,8 @@ export default function HoKhau() {
                           noiSinh: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
@@ -635,7 +603,8 @@ export default function HoKhau() {
                           nguyenQuan: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -649,7 +618,8 @@ export default function HoKhau() {
                           danToc: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -663,7 +633,8 @@ export default function HoKhau() {
                           tonGiao: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
@@ -680,7 +651,8 @@ export default function HoKhau() {
                           quocTich: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -693,7 +665,8 @@ export default function HoKhau() {
                           quanHe: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     >
                       <option value="">Chọn quan hệ</option>
                       {Object.keys(quanHeLabel).map((key) => (
@@ -715,8 +688,9 @@ export default function HoKhau() {
                         diaChiThuongTruTruoc: e.target.value,
                       })
                     }
+                    disabled={memberViewReadOnly}
                     rows={2}
-                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                   />
                 </label>
 
@@ -732,7 +706,8 @@ export default function HoKhau() {
                           ngheNghiep: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -746,19 +721,13 @@ export default function HoKhau() {
                           noiLamViec: e.target.value,
                         })
                       }
-                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      disabled={memberViewReadOnly}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
 
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="submit"
-                    disabled={memberViewSaving}
-                    className="flex-1 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg disabled:opacity-50"
-                  >
-                    {memberViewSaving ? "Đang lưu..." : "Lưu thay đổi"}
-                  </button>
+                <div className="flex justify-end pt-4">
                   <button
                     type="button"
                     onClick={() => {
@@ -771,7 +740,7 @@ export default function HoKhau() {
                     Đóng
                   </button>
                 </div>
-              </form>
+              </div>
             )}
           </div>
         </div>
@@ -1013,9 +982,7 @@ export default function HoKhau() {
                 {viewingHoKhau.ngayCap && (
                   <div>
                     Ngày cấp:{" "}
-                    {new Date(viewingHoKhau.ngayCap).toLocaleDateString(
-                      "vi-VN"
-                    )}
+                    {formatFromYMD(viewingHoKhau.ngayCap)}
                   </div>
                 )}
                 {viewingHoKhau.ghiChu && (
@@ -1051,6 +1018,9 @@ export default function HoKhau() {
                       </th>
                       <th className="px-4 py-2 text-left font-semibold text-gray-700">
                         Ngày sinh
+                      </th>
+                      <th className="px-4 py-2 text-left font-semibold text-gray-700">
+                        Ghi chú
                       </th>
                       <th className="px-4 py-2 text-right font-semibold text-gray-700">
                         Thao tác
@@ -1090,8 +1060,11 @@ export default function HoKhau() {
                         </td>
                         <td className="px-4 py-2 text-gray-700">
                           {nk.ngaySinh
-                            ? new Date(nk.ngaySinh).toLocaleDateString("vi-VN")
+                            ? formatFromYMD(nk.ngaySinh)
                             : "-"}
+                        </td>
+                        <td className="px-4 py-2 text-gray-700">
+                          {(nk.ghiChu ?? "").trim() || "Còn sống"}
                         </td>
                         <td className="px-4 py-2 text-right text-gray-700">
                           <div className="flex justify-end gap-2">
@@ -1102,6 +1075,15 @@ export default function HoKhau() {
                             >
                               👁 Xem
                             </button>
+                            {canEditMember && (
+                              <button
+                                onClick={() => navigateToNhanKhauPage(viewingHoKhau!.id)}
+                                className="rounded-md border border-orange-200 px-3 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:text-orange-600"
+                                title="Chỉnh sửa nhân khẩu ở trang Nhân khẩu"
+                              >
+                                ✏️ Sửa ở trang Nhân khẩu
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

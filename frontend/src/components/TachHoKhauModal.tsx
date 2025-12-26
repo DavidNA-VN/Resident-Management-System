@@ -1,4 +1,5 @@
 import { FormEvent, useState, useEffect } from "react";
+import { formatFromYMD } from "../utils/date";
 
 interface NhanKhau {
   id: number;
@@ -299,7 +300,7 @@ export default function TachHoKhauModal({
                         <td className="py-2 px-3 text-gray-600">{nk.cccd || "-"}</td>
                         <td className="py-2 px-3 text-gray-600">
                           {nk.ngaySinh
-                            ? new Date(nk.ngaySinh).toLocaleDateString("vi-VN")
+                            ? formatFromYMD(nk.ngaySinh)
                             : "-"}
                         </td>
                         <td className="py-2 px-3 text-gray-600">
@@ -385,7 +386,7 @@ export default function TachHoKhauModal({
                       <td className="py-2 px-3 text-gray-600">{nk.cccd || "-"}</td>
                       <td className="py-2 px-3 text-gray-600">
                         {nk.ngaySinh
-                          ? new Date(nk.ngaySinh).toLocaleDateString("vi-VN")
+                          ? formatFromYMD(nk.ngaySinh)
                           : "-"}
                       </td>
                       <td className="py-2 px-3 text-gray-600">

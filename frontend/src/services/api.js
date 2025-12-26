@@ -84,6 +84,12 @@ class ApiService {
             body: JSON.stringify({ chuHoId }),
         });
     }
+    async changeChuHo(hoKhauId, newChuHoId, oldChuHoNewQuanHe) {
+        return this.request(`/ho-khau/${hoKhauId}/change-chu-ho`, {
+            method: "PATCH",
+            body: JSON.stringify({ newChuHoId, oldChuHoNewQuanHe }),
+        });
+    }
     // Nhân khẩu APIs
     async getNhanKhauList(hoKhauId) {
         const cacheBust = `_=${Date.now()}`;

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { apiService } from "../services/api";
+import { formatFromYMD } from "../utils/date";
 
 interface RequestDetailModalProps {
   requestId: number;
@@ -305,7 +306,7 @@ export default function RequestDetailModal({
                           {requestDetail.payload.ngaySinh && (
                             <p>
                               Ngày sinh:{" "}
-                              {new Date(requestDetail.payload.ngaySinh).toLocaleDateString(
+                              {formatFromYMD(requestDetail.payload.ngaySinh)}
                                 "vi-VN"
                               )}
                             </p>

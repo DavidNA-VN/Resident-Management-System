@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiService } from "../../services/api";
+import { formatFromYMD } from "../../utils/date";
 
 interface Household {
   id: number;
@@ -52,29 +53,42 @@ const gioiTinhLabels: Record<string, string> = {
 
 export default function CitizenHome() {
   const [householdData, setHouseholdData] = useState<HouseholdWithMembers | null>(null);
+  const [userInfo, setUserInfo] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadHousehold();
+    loadData();
   }, []);
 
-  const loadHousehold = async () => {
+  const loadData = async () => {
     setIsLoading(true);
     setError(null);
+
     try {
-      const response = await apiService.getCitizenHousehold();
-      if (response.success && response.data) {
-        setHouseholdData(response.data);
-      } else {
-        setError("Không tìm thấy thông tin hộ khẩu");
+      // Lấy thông tin user hiện tại
+      const userResponse = await apiService.getMe();
+      if (userResponse.success) {
+        setUserInfo(userResponse.data);
+      }
+
+      // Nếu user đã linked thì load household
+      if (userResponse.data?.linked) {
+        const response = await apiService.getCitizenHousehold();
+        if (response.success && response.data) {
+          setHouseholdData(response.data);
+        } else if (response.error?.code !== "NOT_LINKED") {
+          // Chỉ set error nếu không phải lỗi NOT_LINKED (đã được handle ở UI)
+          setError(response.error?.message || "Không tìm thấy thông tin hộ khẩu");
+        }
       }
     } catch (err: any) {
-      setError(err.error?.message || "Lỗi khi tải thông tin hộ khẩu");
+      setError(err.error?.message || "Lỗi khi tải dữ liệu");
     } finally {
       setIsLoading(false);
     }
   };
+
 
   if (isLoading) {
     return (
@@ -96,11 +110,69 @@ export default function CitizenHome() {
     );
   }
 
+  // Nếu user chưa linked (chưa có hồ sơ nhân khẩu)
+  if (userInfo && userInfo.linked === false) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="rounded-xl border border-blue-200/80 bg-blue-50/50 p-8 shadow-sm">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
+              <span className="text-3xl">👤</span>
+            </div>
+            <h2 className="text-2xl font-bold text-blue-600 mb-2">Tài khoản chưa liên kết hồ sơ nhân khẩu</h2>
+            <p className="text-blue-700">
+              {userInfo.message || "Bạn đã đăng ký thành công nhưng chưa có hồ sơ nhân khẩu trong hệ thống."}
+            </p>
+          </div>
+
+          <div className="bg-white/70 rounded-lg p-6 mb-6">
+            <h3 className="font-semibold text-gray-800 mb-3">Để sử dụng đầy đủ chức năng:</h3>
+            <div className="space-y-3 text-sm text-gray-700">
+              <div className="flex items-start gap-3">
+                <span className="text-blue-500 mt-1">1.</span>
+                <div>
+                  <p className="font-medium">Tạo yêu cầu thêm nhân khẩu</p>
+                  <p className="text-gray-600">Chọn hộ khẩu bạn muốn gia nhập và điền thông tin cá nhân</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-blue-500 mt-1">2.</span>
+                <div>
+                  <p className="font-medium">Chờ tổ trưởng duyệt</p>
+                  <p className="text-gray-600">Tổ trưởng sẽ kiểm tra và thêm bạn vào hệ thống</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="text-blue-500 mt-1">3.</span>
+                <div>
+                  <p className="font-medium">Đăng nhập lại</p>
+                  <p className="text-gray-600">Sau khi được duyệt, tài khoản sẽ tự động liên kết</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center">
+            <a
+              href="/citizen/yeu-cau"
+              className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 font-semibold"
+            >
+              <span className="mr-2">📝</span>
+              Tạo yêu cầu ngay
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!householdData) {
     return (
-      <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
-        <h2 className="text-xl font-bold text-gray-900 mb-2">Chưa có thông tin</h2>
-        <p className="text-gray-600">Bạn chưa được liên kết với hộ khẩu nào.</p>
+      <div className="rounded-xl border border-yellow-200/80 bg-yellow-50/50 p-8 shadow-sm">
+        <h2 className="text-xl font-bold text-yellow-600 mb-2">Đang tải...</h2>
+        <p className="text-yellow-700">
+          Đang tải thông tin hộ khẩu của bạn...
+        </p>
       </div>
     );
   }
@@ -145,7 +217,7 @@ export default function CitizenHome() {
             <div>
               <p className="text-sm text-gray-500 mb-1">Ngày cấp</p>
               <p className="text-base font-semibold text-gray-900">
-                {new Date(household.ngayCap).toLocaleDateString("vi-VN")}
+                {formatFromYMD(household.ngayCap)}
               </p>
             </div>
           )}
@@ -198,7 +270,7 @@ export default function CitizenHome() {
                     <td className="py-3 px-4 text-sm text-gray-600">{member.cccd || "-"}</td>
                     <td className="py-3 px-4 text-sm text-gray-600">
                       {member.ngaySinh
-                        ? new Date(member.ngaySinh).toLocaleDateString("vi-VN")
+                        ? formatFromYMD(member.ngaySinh)
                         : "-"}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600">
