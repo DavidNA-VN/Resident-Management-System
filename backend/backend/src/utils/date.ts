@@ -62,3 +62,4 @@ export function getCurrentDateString(): string | null {
 export function normalizeDateString(dateString: string | null | undefined): string | null {
   return normalizeDateOnly(dateString);
 }
+
