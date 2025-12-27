@@ -1,36 +1,35 @@
 /**
- * Chuẩn hóa CCCD (Căn cước công dân)
- * - Trim spaces
- * - Remove all non-numeric characters
- * - Return null if empty after normalization
+ * Utility functions để xử lý CCCD (Căn cước công dân)
  */
-export function normalizeCCCD(cccd: string): string | null {
-  if (!cccd || typeof cccd !== 'string') {
+
+/**
+ * Chuẩn hóa CCCD: Loại bỏ tất cả ký tự không phải số
+ * Input: string (có thể chứa spaces, dashes, etc.)
+ * Output: string chỉ chứa số hoặc null nếu invalid
+ */
+export function normalizeCCCD(cccd: string | null | undefined): string | null {
+  if (!cccd) return null;
+
+  try {
+    // Loại bỏ tất cả ký tự không phải số
+    const normalized = cccd.toString().replace(/[^0-9]/g, '');
+
+    // Trả về null nếu sau khi normalize là empty string
+    return normalized.length > 0 ? normalized : null;
+  } catch (error) {
+    console.warn('Error normalizing CCCD:', error);
     return null;
   }
-
-  // Trim và loại bỏ tất cả ký tự không phải số
-  const normalized = cccd.trim().replace(/[^0-9]/g, '');
-
-  // Return null if empty after normalization
-  if (normalized.length === 0) {
-    return null;
-  }
-
-  return normalized;
 }
 
 /**
- * Validate normalized CCCD
- * - Must be numeric only
- * - Length between 9-12 characters
+ * Validate CCCD đã normalized
+ * - Chỉ chứa số
+ * - Độ dài 9-12 ký tự
  */
 export function isValidCCCD(cccd: string): boolean {
   const normalized = normalizeCCCD(cccd);
-  if (!normalized) {
-    return false;
-  }
+  if (!normalized) return false;
 
-  // Check length (typically 9-12 digits for Vietnamese ID)
   return normalized.length >= 9 && normalized.length <= 12;
 }

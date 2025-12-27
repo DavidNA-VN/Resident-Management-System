@@ -72,6 +72,9 @@ export default function HoKhau() {
   const [viewNhanKhau, setViewNhanKhau] = useState<NhanKhau[]>([]);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError, setViewError] = useState<string | null>(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyList, setHistoryList] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const emptyMemberFull: NhanKhauFull = {
     id: 0,
@@ -113,7 +116,6 @@ export default function HoKhau() {
   const canEditMember = currentUser?.role !== "nguoi_dan";
 
   const [formData, setFormData] = useState({
-    soHoKhau: "",
     diaChi: "",
     diaChiDayDu: "",
     tinhThanh: "",
@@ -188,6 +190,24 @@ export default function HoKhau() {
     }
   };
 
+  const openHistoryModal = async (hoKhauId: number) => {
+    setShowHistoryModal(true);
+    setHistoryLoading(true);
+    try {
+      const resp = await apiService.getHoKhauHistory(hoKhauId);
+      if (resp.success) {
+        setHistoryList(resp.data);
+      } else {
+        setHistoryList([]);
+      }
+    } catch (err: any) {
+      setHistoryList([]);
+      setViewError(err.error?.message || "Lỗi khi tải lịch sử");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const closeViewHousehold = () => {
     setShowViewModal(false);
     setViewingHoKhau(null);
@@ -196,6 +216,55 @@ export default function HoKhau() {
     setShowMemberViewModal(false);
     setViewingNhanKhauDetail(null);
     setMemberViewError(null);
+  };
+
+  // History modal render
+  const HistoryModal = () => {
+    if (!showHistoryModal) return null;
+    return (
+      <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/50 p-4">
+        <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-lg">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Lịch sử thay đổi – Hộ khẩu</h3>
+            <button onClick={() => setShowHistoryModal(false)} className="text-gray-500">Đóng</button>
+          </div>
+          {historyLoading ? (
+            <div className="text-center text-gray-500">Đang tải lịch sử...</div>
+          ) : historyList.length === 0 ? (
+            <div className="text-center text-gray-500">Không có lịch sử nào.</div>
+          ) : (
+            <div className="overflow-y-auto max-h-80">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Thời gian</th>
+                    <th className="px-3 py-2 text-left">Hành động</th>
+                    <th className="px-3 py-2 text-left">Trường</th>
+                    <th className="px-3 py-2 text-left">Nội dung cũ → mới</th>
+                    <th className="px-3 py-2 text-left">Người thực hiện</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {historyList.map((h) => (
+                    <tr key={h.id}>
+                      <td className="px-3 py-2">{new Date(h.createdAt).toLocaleString("vi-VN")}</td>
+                      <td className="px-3 py-2">{h.hanhDong}</td>
+                      <td className="px-3 py-2">{h.truong}</td>
+                      <td className="px-3 py-2">
+                        <div className="text-xs text-gray-600">
+                          {h.noiDungCu || "-"} → {h.noiDungMoi || "-"}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">{h.nguoiThucHienName || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   const navigateToNhanKhauPage = (hoKhauId: number) => {
@@ -309,7 +378,9 @@ export default function HoKhau() {
         // Tải lại danh sách để đồng bộ với server
         await loadHoKhauList();
       } else {
-        setError("Không thể cập nhật hộ khẩu");
+        // Hiển thị error message từ server nếu có
+        const errorMessage = response.error?.message || "Không thể cập nhật hộ khẩu";
+        setError(errorMessage);
       }
     } catch (err: any) {
       setError(err.error?.message || "Lỗi khi cập nhật hộ khẩu");
@@ -323,15 +394,14 @@ export default function HoKhau() {
     setError(null);
     setSuccess(null);
 
-    if (!formData.soHoKhau || !formData.diaChi) {
-      setError("Vui lòng điền số hộ khẩu và địa chỉ");
+    if (!formData.diaChi) {
+      setError("Vui lòng điền địa chỉ");
       return;
     }
 
     setIsLoading(true);
     try {
       const response = await apiService.createHoKhau({
-        soHoKhau: formData.soHoKhau,
         diaChi: formData.diaChi,
         diaChiDayDu: formData.diaChiDayDu || undefined,
         tinhThanh: formData.tinhThanh || undefined,
@@ -344,10 +414,10 @@ export default function HoKhau() {
       });
 
       if (response.success) {
-        setSuccess("Tạo hộ khẩu thành công!");
+        const generatedCode = response.data?.soHoKhau;
+        setSuccess(`Tạo hộ khẩu thành công! Mã số: ${generatedCode}`);
         setShowCreateForm(false);
         setFormData({
-          soHoKhau: "",
           diaChi: "",
           diaChiDayDu: "",
           tinhThanh: "",
@@ -770,17 +840,17 @@ export default function HoKhau() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <label className="block text-sm font-medium text-gray-700">
-                  Số hộ khẩu <span className="text-red-500">*</span>
+                  Số hộ khẩu
                   <input
                     type="text"
-                    required
-                    value={formData.soHoKhau}
-                    onChange={(e) =>
-                      setFormData({ ...formData, soHoKhau: e.target.value })
-                    }
-                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    placeholder="VD: HK001"
+                    readOnly
+                    value=""
+                    className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500 cursor-not-allowed"
+                    placeholder="Tự động sinh (HK001...)"
                   />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Số hộ khẩu được sinh tự động theo định dạng HKxxx
+                  </p>
                 </label>
 
                 <label className="block text-sm font-medium text-gray-700">
@@ -988,8 +1058,17 @@ export default function HoKhau() {
                 {viewingHoKhau.ghiChu && (
                   <div>Ghi chú: {viewingHoKhau.ghiChu}</div>
                 )}
+                <div className="pt-2">
+                  <button
+                    onClick={() => openHistoryModal(viewingHoKhau.id)}
+                    className="rounded-md border border-gray-200 bg-white px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    📋 Xem lịch sử thay đổi
+                  </button>
+                </div>
               </div>
             </div>
+            <HistoryModal />
 
             {viewLoading ? (
               <div className="p-4 text-center text-gray-500">
