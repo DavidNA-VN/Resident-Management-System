@@ -6,3 +6,5 @@ ADD COLUMN attachments JSONB DEFAULT '[]'::jsonb;
 COMMENT ON COLUMN tam_tru_vang.attachments IS 'Array of file attachments with metadata: [{id, name, originalName, mimeType, size, path, url, uploadedAt}]';
 
 
+
+

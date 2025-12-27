@@ -1,7 +1,12 @@
 import express from "express";
 import app from "./app";
+import authRoutes from "./routes/auth.routes";
+import hokhauRoutes from "./routes/hokhau.routes";
+import nhankhauRoutes from "./routes/nhankhau.routes";
+import citizenRoutes from "./routes/citizen.routes";
+import requestsRoutes from "./routes/requests.routes";
+// Optional: mount other routes when ready
 // import healthRoutes from "./routes/health.routes";
-// import authRoutes from "./routes/auth.routes";
 // import testRoutes from "./routes/test.routes";
 // import hokhauRoutes from "./routes/hokhau.routes";
 // import nhankhauRoutes from "./routes/nhankhau.routes";
@@ -48,8 +53,16 @@ async function findAvailablePort(startPort: number): Promise<number> {
 }
 
 // Mount API routes under /api to standardize frontend/backend prefix
+// Mount only auth routes for now to enable login
+app.use("/api", authRoutes);
+// Mount household and person routes so FE requests to /api/ho-khau and /api/nhan-khau are handled
+app.use("/api", hokhauRoutes);
+app.use("/api", nhankhauRoutes);
+// Mount citizen routes (for endpoints like /api/citizen/household)
+app.use("/api", citizenRoutes);
+// Mount requests routes (create requests, leader endpoints)
+app.use("/api", requestsRoutes);
 // app.use("/api", healthRoutes);
-// app.use("/api", authRoutes);
 // app.use("/api", testRoutes);
 // app.use("/api", hokhauRoutes);
 // app.use("/api", nhankhauRoutes);
