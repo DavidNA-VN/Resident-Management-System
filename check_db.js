@@ -1,3 +1,4 @@
+require('dotenv').config({ path: './backend/.env' });
 const { query } = require('./backend/backend/src/db');
 const path = require('path');
 

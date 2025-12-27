@@ -160,9 +160,21 @@ export default function YeuCau() {
   };
 
   const handleSubmitRequest = async (data: { type: string; payload: any }) => {
-    const response = await apiService.createRequest(
-      data as { type: RequestType | "TACH_HO_KHAU" | "ADD_NEWBORN"; payload: any }
-    );
+    // Map UI type to backend enum
+    const typeMapping: Record<string, string> = {
+      "TAM_TRU": "TEMPORARY_RESIDENCE",
+      "TAM_VANG": "TEMPORARY_ABSENCE",
+      "TACH_HO_KHAU": "TACH_HO_KHAU",
+      "SUA_NHAN_KHAU": "SUA_NHAN_KHAU",
+      "XOA_NHAN_KHAU": "XOA_NHAN_KHAU",
+    };
+
+    const backendType = typeMapping[data.type] || data.type;
+
+    const response = await apiService.createRequest({
+      type: backendType,
+      payload: data.payload
+    });
     if (response.success) {
       setSuccess("Gửi yêu cầu thành công!");
       setTimeout(() => setSuccess(null), 3000);

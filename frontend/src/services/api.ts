@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+// Frontend will read from VITE_API_URL env variable
+// If backend runs on different port, update frontend/.env: VITE_API_URL=http://localhost:<PORT>/api
+export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 export interface LoginRequest {
   username: string;
@@ -93,7 +95,20 @@ class ApiService {
     };
 
     if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
+      (headers as any)["Authorization"] = `Bearer ${token}`;
+    }
+
+    // debug log
+    try {
+      // eslint-disable-next-line no-console
+      console.log("[api.request] ->", {
+        url: `${API_BASE_URL}${endpoint}`,
+        method: options.method || "GET",
+        tokenExists: !!token,
+        headers,
+      });
+    } catch (e) {
+      // ignore
     }
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -102,13 +117,45 @@ class ApiService {
       cache: "no-store",
     });
 
-    const data = await response.json();
+    let data: any = null;
+    let rawText: string | null = null;
+    try {
+      rawText = await response.text();
+      try {
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch (e) {
+        data = rawText;
+      }
+    } catch (e) {
+      data = null;
+    }
+
+    // debug response
+    try {
+      // eslint-disable-next-line no-console
+      console.log("[api.request] <-", { status: response.status, data, rawTextSnippet: typeof rawText === "string" ? rawText.slice(0, 200) : null });
+    } catch (e) {
+      // ignore
+    }
 
     if (!response.ok) {
-      throw {
-        status: response.status,
-        ...data,
-      };
+      const thrown: any = { status: response.status, rawText };
+      if (data && (data as any).error) {
+        thrown.error = (data as any).error;
+        thrown.message = (data as any).error.message;
+      } else if (data && (data as any).message) {
+        thrown.error = { message: (data as any).message };
+        thrown.message = (data as any).message;
+      } else if (typeof data === "string") {
+        thrown.error = { message: data };
+        thrown.message = data;
+      } else {
+        thrown.error = { message: `HTTP ${response.status}` };
+        thrown.message = `HTTP ${response.status}`;
+      }
+      // eslint-disable-next-line no-console
+      console.error("[api.request] throwing", thrown);
+      throw thrown;
     }
 
     return data;
@@ -313,7 +360,6 @@ class ApiService {
     ngheNghiep?: string;
     noiLamViec?: string;
     ghiChu?: string;
-    ghiChu?: string;
   }) {
     return this.request<{ success: boolean; data: any }>("/nhan-khau", {
       method: "POST",
@@ -484,48 +530,21 @@ class ApiService {
 
   // TODO: Thay bằng API thật khi backend sẵn sàng
   // GET /requests?type=&status= - Lấy danh sách yêu cầu (cho tổ trưởng/cán bộ)
-  async getRequestsList(filters?: { type?: string; status?: string }) {
-    try {
-      const params = new URLSearchParams();
-      if (filters?.type) params.append("type", filters.type);
-      if (filters?.status) params.append("status", filters.status);
-      const queryString = params.toString();
-      const url = `/requests${queryString ? `?${queryString}` : ""}`;
+  async getRequestsList(filters?: { type?: string; status?: string; keyword?: string; fromDate?: string; toDate?: string; page?: number; limit?: number }) {
+    const params = new URLSearchParams();
+    if (filters?.type) params.append("type", filters.type);
+    if (filters?.status) params.append("status", filters.status);
+    if (filters?.keyword) params.append("keyword", filters.keyword);
+    if (filters?.fromDate) params.append("fromDate", filters.fromDate);
+    if (filters?.toDate) params.append("toDate", filters.toDate);
+    if (filters?.page) params.append("page", String(filters.page));
+    if (filters?.limit) params.append("limit", String(filters.limit));
+    const queryString = params.toString();
+    const url = `/requests${queryString ? `?${queryString}` : ""}`;
 
-      return await this.request<{ success: boolean; data: any[] }>(url, {
-        method: "GET",
-      });
-    } catch (err) {
-      // Mock data nếu API chưa sẵn sàng
-      console.warn("API /requests chưa sẵn sàng, sử dụng mock data");
-      return Promise.resolve({
-        success: true,
-        data: [
-          {
-            id: 1,
-            type: "TACH_HO_KHAU",
-            loaiYeuCau: "Yêu cầu tách hộ khẩu",
-            nguoiGui: {
-              hoTen: "Nguyễn Văn A",
-              cccd: "079912345678",
-            },
-            hoKhauLienQuan: {
-              soHoKhau: "HK001234",
-              diaChi: "Số 123, Đường ABC",
-            },
-            createdAt: new Date().toISOString(),
-            status: "pending",
-            payload: {
-              selectedNhanKhauIds: [1, 2],
-              newChuHoId: 2,
-              newAddress: "Số 789, Đường XYZ",
-              expectedDate: "2025-12-24",
-              reason: "Tách hộ để quản lý riêng",
-            },
-          },
-        ],
-      });
-    }
+    return await this.request<{ success: boolean; data: any[] }>(url, {
+      method: "GET",
+    });
   }
 
   async getRequestDetail(requestId: number) {
@@ -558,6 +577,102 @@ class ApiService {
       {
         method: "POST",
         body: JSON.stringify({ reason }),
+      }
+    );
+  }
+
+  // Tam Tru Tam Vang APIs
+  async getTamTruVangRequests(filters?: { type?: string; status?: string; keyword?: string; fromDate?: string; toDate?: string; page?: number; limit?: number }) {
+    const params = new URLSearchParams();
+    if (filters?.type && filters.type !== "all") params.append("type", filters.type);
+    if (filters?.status && filters.status !== "all") params.append("status", filters.status);
+    if (filters?.keyword) params.append("keyword", filters.keyword);
+    if (filters?.fromDate) params.append("fromDate", filters.fromDate);
+    if (filters?.toDate) params.append("toDate", filters.toDate);
+    if (filters?.page) params.append("page", String(filters.page));
+    if (filters?.limit) params.append("limit", String(filters.limit));
+    const queryString = params.toString();
+    const url = `/tam-tru-vang/requests${queryString ? `?${queryString}` : ""}`;
+
+    return this.request<{
+      success: boolean;
+      data: any[];
+      pagination?: {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+      }
+    }>(url, {
+      method: "GET",
+    });
+  }
+
+  async getTamTruVangRequestDetail(requestId: number) {
+    return this.request<{ success: boolean; data: any }>(
+      `/tam-tru-vang/requests/${requestId}`,
+      {
+        method: "GET",
+      }
+    );
+  }
+
+  // Alias for backward compatibility
+  async getTamTruTamVangRequestDetail(requestId: number) {
+    return this.getTamTruVangRequestDetail(requestId);
+  }
+
+  async approveTamTruVangRequest(requestId: number) {
+    return this.request<{ success: boolean; data: any }>(
+      `/tam-tru-vang/requests/${requestId}/approve`,
+      {
+        method: "POST",
+      }
+    );
+  }
+
+  async rejectTamTruVangRequest(requestId: number, reason: string) {
+    return this.request<{ success: boolean; data: any }>(
+      `/tam-tru-vang/requests/${requestId}/reject`,
+      {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }
+    );
+  }
+
+  // Citizen API for creating tam-tru-vang request with file upload
+  async createTamTruVangRequest(data: {
+    loai: "tam_tru" | "tam_vang";
+    nhanKhauId: number;
+    tuNgay: string;
+    denNgay?: string;
+    diaChi: string;
+    lyDo: string;
+    attachments?: File[];
+  }) {
+    const formData = new FormData();
+    formData.append("loai", data.loai);
+    formData.append("nhanKhauId", String(data.nhanKhauId));
+    formData.append("tuNgay", data.tuNgay);
+    if (data.denNgay) formData.append("denNgay", data.denNgay);
+    formData.append("diaChi", data.diaChi);
+    formData.append("lyDo", data.lyDo);
+
+    if (data.attachments) {
+      data.attachments.forEach((file, index) => {
+        formData.append(`attachments`, file);
+      });
+    }
+
+    return this.request<{ success: boolean; data: { id: number } }>(
+      "/citizen/tam-tru-vang",
+      {
+        method: "POST",
+        body: formData,
+        headers: {
+          // Don't set Content-Type for FormData, let browser set it with boundary
+        },
       }
     );
   }

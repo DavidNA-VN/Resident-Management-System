@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, QueryResult } from "pg";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -12,6 +12,6 @@ export const pool = new Pool({
   connectionString: databaseUrl,
 });
 
-export async function query<T = any>(text: string, params?: any[]) {
-  return pool.query<T>(text, params);
+export async function query(text: string, params?: any[]) {
+  return pool.query(text, params);
 }

@@ -2,6 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { apiService } from "../services/api";
+import { formatDateForInput, formatFromYMD, normalizeDateOnly } from "../utils/date";
 export default function NhanKhau() {
     const [searchParams] = useSearchParams();
     const [hoKhauList, setHoKhauList] = useState([]);
@@ -243,9 +244,9 @@ export default function NhanKhau() {
                 hoTen: normalizeField(formData.hoTen),
                 biDanh: normalizeField(formData.biDanh) || undefined,
                 cccd: normalizeField(formData.cccd) || undefined,
-                ngayCapCCCD: normalizeField(formData.ngayCapCCCD) || undefined,
+                ngayCapCCCD: normalizeDateOnly(formData.ngayCapCCCD) || undefined,
                 noiCapCCCD: normalizeField(formData.noiCapCCCD) || undefined,
-                ngaySinh: normalizeField(formData.ngaySinh) || undefined,
+                ngaySinh: normalizeDateOnly(formData.ngaySinh) || undefined,
                 gioiTinh: formData.gioiTinh === "nam" ||
                     formData.gioiTinh === "nu" ||
                     formData.gioiTinh === "khac"
@@ -257,7 +258,7 @@ export default function NhanKhau() {
                 tonGiao: normalizeField(formData.tonGiao) || undefined,
                 quocTich: normalizeField(formData.quocTich) || undefined,
                 quanHe: formData.quanHe,
-                ngayDangKyThuongTru: normalizeField(formData.ngayDangKyThuongTru) || undefined,
+                ngayDangKyThuongTru: normalizeDateOnly(formData.ngayDangKyThuongTru) || undefined,
                 diaChiThuongTruTruoc: normalizeField(formData.diaChiThuongTruTruoc) || undefined,
                 ngheNghiep: normalizeField(formData.ngheNghiep) || undefined,
                 noiLamViec: normalizeField(formData.noiLamViec) || undefined,
@@ -316,9 +317,9 @@ export default function NhanKhau() {
                     hoTen: nk.hoTen || "",
                     biDanh: nk.biDanh || "",
                     cccd: nk.cccd || "",
-                    ngayCapCCCD: nk.ngayCapCCCD ? nk.ngayCapCCCD.substring(0, 10) : "",
+                    ngayCapCCCD: formatDateForInput(nk.ngayCapCCCD),
                     noiCapCCCD: nk.noiCapCCCD || "",
-                    ngaySinh: nk.ngaySinh ? nk.ngaySinh.substring(0, 10) : "",
+                    ngaySinh: formatDateForInput(nk.ngaySinh),
                     gioiTinh: nk.gioiTinh || "",
                     noiSinh: nk.noiSinh || "",
                     nguyenQuan: nk.nguyenQuan || "",
@@ -326,9 +327,7 @@ export default function NhanKhau() {
                     tonGiao: nk.tonGiao || "",
                     quocTich: nk.quocTich || "Việt Nam",
                     quanHe: nk.quanHe || "",
-                    ngayDangKyThuongTru: nk.ngayDangKyThuongTru
-                        ? nk.ngayDangKyThuongTru.substring(0, 10)
-                        : "",
+                    ngayDangKyThuongTru: formatDateForInput(nk.ngayDangKyThuongTru),
                     diaChiThuongTruTruoc: nk.diaChiThuongTruTruoc || "",
                     ngheNghiep: nk.ngheNghiep || "",
                     noiLamViec: nk.noiLamViec || "",
@@ -402,9 +401,9 @@ export default function NhanKhau() {
                 hoTen: normalizeField(viewForm.hoTen) || undefined,
                 biDanh: normalizeField(viewForm.biDanh) || undefined,
                 cccd: normalizeField(viewForm.cccd) || undefined,
-                ngayCapCCCD: normalizeField(viewForm.ngayCapCCCD) || undefined,
+                ngayCapCCCD: normalizeDateOnly(viewForm.ngayCapCCCD) || undefined,
                 noiCapCCCD: normalizeField(viewForm.noiCapCCCD) || undefined,
-                ngaySinh: normalizeField(viewForm.ngaySinh) || undefined,
+                ngaySinh: normalizeDateOnly(viewForm.ngaySinh) || undefined,
                 gioiTinh: viewForm.gioiTinh === "nam" ||
                     viewForm.gioiTinh === "nu" ||
                     viewForm.gioiTinh === "khac"
@@ -416,7 +415,7 @@ export default function NhanKhau() {
                 tonGiao: normalizeField(viewForm.tonGiao) || undefined,
                 quocTich: normalizeField(viewForm.quocTich) || undefined,
                 quanHe: normalizeField(viewForm.quanHe) || undefined,
-                ngayDangKyThuongTru: normalizeField(viewForm.ngayDangKyThuongTru) || undefined,
+                ngayDangKyThuongTru: normalizeDateOnly(viewForm.ngayDangKyThuongTru) || undefined,
                 diaChiThuongTruTruoc: normalizeField(viewForm.diaChiThuongTruTruoc) || undefined,
                 ngheNghiep: normalizeField(viewForm.ngheNghiep) || undefined,
                 noiLamViec: normalizeField(viewForm.noiLamViec) || undefined,
@@ -614,6 +613,6 @@ export default function NhanKhau() {
                                                         : nk.gioiTinh === "khac"
                                                             ? "Khác"
                                                             : "-" }), _jsx("td", { className: "px-4 py-3 text-sm text-gray-600", children: nk.ngaySinh
-                                                    ? new Date(nk.ngaySinh).toLocaleDateString("vi-VN")
+                                                    ? formatFromYMD(nk.ngaySinh)
                                                     : "-" }), _jsx("td", { className: "px-4 py-3 text-right text-sm text-gray-600 space-x-2", children: _jsx("button", { onClick: () => openViewNhanKhau(nk.id), className: "rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-blue-300 hover:text-blue-600", title: "Xem/S\u1EEDa", children: "\uD83D\uDC41 Xem" }) })] }, nk.id))) })] }) }))] })] }));
 }

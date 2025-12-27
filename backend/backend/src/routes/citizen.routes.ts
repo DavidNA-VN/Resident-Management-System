@@ -1,6 +1,44 @@
 import { Router } from "express";
 import { query } from "../db";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+
+// Configure multer for file uploads
+const uploadsDir = path.join(__dirname, "../../uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow common document and image types
+    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only document and image files are allowed!'));
+    }
+  }
+});
 
 const router = Router();
 
@@ -141,6 +179,159 @@ router.get("/citizen/households", async (req, res, next) => {
       data: householdsResult.rows,
     });
   } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /citizen/tam-tru-vang
+ * Tạo yêu cầu tạm trú/tạm vắng kèm file đính kèm
+ */
+router.post("/citizen/tam-tru-vang", requireAuth, requireRole(["nguoi_dan"]), upload.array('attachments', 5), async (req, res, next) => {
+  try {
+    const userId = req.user!.id;
+    const { loai, nhanKhauId, tuNgay, denNgay, diaChi, lyDo } = req.body;
+
+    // Validate required fields
+    if (!loai || !nhanKhauId || !tuNgay || !diaChi || !lyDo) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Thiếu thông tin bắt buộc: loai, nhanKhauId, tuNgay, diaChi, lyDo"
+        }
+      });
+    }
+
+    // Validate loai
+    if (!['tam_tru', 'tam_vang'].includes(loai)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Loại phải là 'tam_tru' hoặc 'tam_vang'"
+        }
+      });
+    }
+
+    // Check if nhanKhauId belongs to user's household
+    const nhanKhauCheck = await query(
+      `SELECT nk.id, nk."hoKhauId", hk."chuHoId"
+       FROM nhan_khau nk
+       JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+       WHERE nk.id = $1`,
+      [nhanKhauId]
+    );
+
+    if (nhanKhauCheck.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "NOT_FOUND",
+          message: "Nhân khẩu không tồn tại"
+        }
+      });
+    }
+
+    const nhanKhau = nhanKhauCheck.rows[0];
+
+    // Check if user is linked to this household (either as the person or as head of household)
+    const userLinkCheck = await query(
+      `SELECT "personId" FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    const isLinkedToPerson = userLinkCheck.rows[0]?.personId == nhanKhauId;
+    const isHeadOfHousehold = nhanKhau.chuHoId == userId;
+
+    if (!isLinkedToPerson && !isHeadOfHousehold) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "FORBIDDEN",
+          message: "Bạn không có quyền tạo yêu cầu cho nhân khẩu này"
+        }
+      });
+    }
+
+    // Process uploaded files
+    const attachments = [];
+    if (req.files && Array.isArray(req.files)) {
+      for (const file of req.files as Express.Multer.File[]) {
+        const attachment = {
+          id: Date.now() + Math.random(),
+          name: file.filename,
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+          size: file.size,
+          path: file.path,
+          url: `/uploads/${file.filename}`,
+          uploadedAt: new Date().toISOString()
+        };
+        attachments.push(attachment);
+      }
+    }
+
+    // Insert into tam_tru_vang table
+    const insertResult = await query(
+      `INSERT INTO tam_tru_vang (
+        "nhanKhauId", loai, "tuNgay", "denNgay", "diaChi", "lyDo",
+        "nguoiDangKy", attachments, "trangThai"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'cho_duyet')
+      RETURNING id`,
+      [
+        nhanKhauId,
+        loai,
+        tuNgay,
+        denNgay || null,
+        diaChi,
+        lyDo,
+        userId,
+        JSON.stringify(attachments)
+      ]
+    );
+
+    const tamTruVangId = insertResult.rows[0].id;
+
+    // Also create a request record for tracking
+    const requestType = loai === 'tam_tru' ? 'TEMPORARY_RESIDENCE' : 'TEMPORARY_ABSENCE';
+    const payload = {
+      nhanKhauId: parseInt(nhanKhauId),
+      tuNgay,
+      denNgay: denNgay || null,
+      diaChi,
+      lyDo,
+      attachments
+    };
+
+    await query(
+      `INSERT INTO requests ("requesterUserId", type, "targetPersonId", payload, status)
+       VALUES ($1, $2, $3, $4, 'PENDING')`,
+      [userId, requestType, nhanKhauId, JSON.stringify(payload)]
+    );
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        id: tamTruVangId,
+        message: "Yêu cầu đã được tạo thành công"
+      }
+    });
+
+  } catch (err: any) {
+    // If error occurs and files were uploaded, clean them up
+    if (req.files && Array.isArray(req.files)) {
+      for (const file of req.files as Express.Multer.File[]) {
+        try {
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+          }
+        } catch (cleanupErr) {
+          console.error("Error cleaning up file:", cleanupErr);
+        }
+      }
+    }
+
     next(err);
   }
 });

@@ -31,6 +31,8 @@ const requestTypeLabels: Record<string, string> = {
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
   SUA_NHAN_KHAU: "Sửa thông tin nhân khẩu",
   XOA_NHAN_KHAU: "Xoá nhân khẩu",
+  TAM_TRU: "Xin tạm trú",
+  TAM_VANG: "Xin tạm vắng",
 };
 
 const quanHeLabels: Record<string, string> = {
@@ -67,7 +69,16 @@ export default function RequestDetailModal({
     setIsLoading(true);
     setError(null);
     try {
-      const response = await apiService.getRequestDetail(requestId);
+      // For tam-tru-vang requests, use the specific API
+      const isTamTruVang = requestDetail?.type === 'TEMPORARY_RESIDENCE' ||
+                          requestDetail?.type === 'TEMPORARY_ABSENCE' ||
+                          requestDetail?.type === 'TAM_TRU' ||
+                          requestDetail?.type === 'TAM_VANG';
+
+      const response = isTamTruVang
+        ? await apiService.getTamTruVangRequestDetail(requestId)
+        : await apiService.getRequestDetail(requestId);
+
       if (response.success) {
         setRequestDetail(response.data);
       }
@@ -86,7 +97,16 @@ export default function RequestDetailModal({
     setIsSubmitting(true);
     setError(null);
     try {
-      const response = await apiService.approveRequest(requestId);
+      // For tam-tru-vang requests, use the specific API
+      const isTamTruVang = requestDetail?.type === 'TEMPORARY_RESIDENCE' ||
+                          requestDetail?.type === 'TEMPORARY_ABSENCE' ||
+                          requestDetail?.type === 'TAM_TRU' ||
+                          requestDetail?.type === 'TAM_VANG';
+
+      const response = isTamTruVang
+        ? await apiService.approveTamTruVangRequest(requestId)
+        : await apiService.approveRequest(requestId);
+
       if (response.success) {
         alert("Duyệt yêu cầu thành công!");
         onRefresh();
@@ -108,7 +128,16 @@ export default function RequestDetailModal({
     setIsSubmitting(true);
     setError(null);
     try {
-      const response = await apiService.rejectRequest(requestId, rejectReason);
+      // For tam-tru-vang requests, use the specific API
+      const isTamTruVang = requestDetail?.type === 'TEMPORARY_RESIDENCE' ||
+                          requestDetail?.type === 'TEMPORARY_ABSENCE' ||
+                          requestDetail?.type === 'TAM_TRU' ||
+                          requestDetail?.type === 'TAM_VANG';
+
+      const response = isTamTruVang
+        ? await apiService.rejectTamTruVangRequest(requestId, rejectReason)
+        : await apiService.rejectRequest(requestId, rejectReason);
+
       if (response.success) {
         alert("Từ chối yêu cầu thành công!");
         setShowRejectModal(false);
@@ -351,6 +380,106 @@ export default function RequestDetailModal({
                           </p>
                         </div>
                       )}
+                      {requestDetail.payload.lyDo && (
+                        <div>
+                          <p className="text-sm font-medium text-gray-700 mb-2">Lý do</p>
+                          <p className="text-sm text-gray-600 whitespace-pre-wrap">
+                            {requestDetail.payload.lyDo}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {requestDetail.type === "TAM_TRU" && requestDetail.payload && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Chi tiết yêu cầu tạm trú
+                    </h3>
+                    <div className="space-y-4">
+                      {requestDetail.payload.nhanKhauId && (
+                        <div>
+                          <p className="text-sm font-medium text-gray-700 mb-2">
+                            Nhân khẩu xin tạm trú
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            ID: {requestDetail.payload.nhanKhauId}
+                          </p>
+                        </div>
+                      )}
+                      {requestDetail.payload.diaChi && (
+                        <div>
+                          <p className="text-sm font-medium text-gray-700 mb-2">Địa chỉ tạm trú</p>
+                          <p className="text-sm text-gray-600">
+                            {requestDetail.payload.diaChi}
+                          </p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-4">
+                        {requestDetail.payload.tuNgay && (
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">Từ ngày</p>
+                            <p className="text-sm text-gray-600">
+                              {formatFromYMD(requestDetail.payload.tuNgay)}
+                            </p>
+                          </div>
+                        )}
+                        {requestDetail.payload.denNgay && (
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">Đến ngày</p>
+                            <p className="text-sm text-gray-600">
+                              {formatFromYMD(requestDetail.payload.denNgay)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      {requestDetail.payload.lyDo && (
+                        <div>
+                          <p className="text-sm font-medium text-gray-700 mb-2">Lý do</p>
+                          <p className="text-sm text-gray-600 whitespace-pre-wrap">
+                            {requestDetail.payload.lyDo}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {requestDetail.type === "TAM_VANG" && requestDetail.payload && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Chi tiết yêu cầu tạm vắng
+                    </h3>
+                    <div className="space-y-4">
+                      {requestDetail.payload.nhanKhauId && (
+                        <div>
+                          <p className="text-sm font-medium text-gray-700 mb-2">
+                            Nhân khẩu xin tạm vắng
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            ID: {requestDetail.payload.nhanKhauId}
+                          </p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-4">
+                        {requestDetail.payload.tuNgay && (
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">Từ ngày</p>
+                            <p className="text-sm text-gray-600">
+                              {formatFromYMD(requestDetail.payload.tuNgay)}
+                            </p>
+                          </div>
+                        )}
+                        {requestDetail.payload.denNgay && (
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">Đến ngày</p>
+                            <p className="text-sm text-gray-600">
+                              {formatFromYMD(requestDetail.payload.denNgay)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
                       {requestDetail.payload.lyDo && (
                         <div>
                           <p className="text-sm font-medium text-gray-700 mb-2">Lý do</p>

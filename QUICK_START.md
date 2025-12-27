@@ -43,10 +43,22 @@ Test-NetConnection -ComputerName localhost -Port 5173 -InformationLevel Quiet
 ```
 
 ## ⚠️ Lưu ý
+- **Database phải đã được tạo** (`census_management` trên PostgreSQL port 5434)
+- **File `.env` phải tồn tại** trong thư mục `backend/` (hoặc `backend/backend/` tùy cấu trúc)
+- **Node.js version:** 18-20 (khuyến nghị 20.19.6)
 
-1. **Database phải đã được tạo** (`census_management` trên PostgreSQL port 5434)
-2. **File `.env` phải tồn tại** trong thư mục `backend/`
-3. **Node.js version:** 18-20 (khuyến nghị 20.19.6)
+### Thiết lập biến môi trường (DATABASE_URL)
+
+1. Tạo file `.env` trong `backend/` (hoặc `backend/backend/` nếu project đặt như vậy).
+2. Thêm dòng sau (thay `your_password` và `ktpm`/`census_management` bằng giá trị thực của bạn):
+
+```text
+DATABASE_URL=postgresql://postgres:your_password@localhost:5432/ktpm
+```
+
+3. Lưu ý:
+- Nếu bạn thấy error "Missing DATABASE_URL", kiểm tra lại file `.env` và đảm bảo `dotenv` được load (project đã có `require('dotenv').config()` trong nhiều script).
+- Nếu bạn muốn giữ file `.env` private, có thể tạo file `backend/.env.example` với dòng trên (không chứa password thật) và copy thành `.env` trên máy dev.
 
 ## 🐛 Xử lý lỗi
 

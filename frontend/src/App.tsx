@@ -10,6 +10,7 @@ import CitizenHome from "./pages/citizen/Home";
 import YeuCau from "./pages/citizen/YeuCau";
 import PhanAnh from "./pages/citizen/PhanAnh";
 import Requests from "./pages/Requests";
+import TamTruTamVangRequests from "./pages/TamTruTamVangRequests";
 
 function App() {
   return (
@@ -76,12 +77,7 @@ function App() {
           element={
             <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
               <Layout>
-                <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
-                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                    Tạm trú / Tạm vắng
-                  </h1>
-                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
-                </div>
+                <TamTruTamVangRequests />
               </Layout>
             </ProtectedRoute>
           }
