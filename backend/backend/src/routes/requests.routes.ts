@@ -28,6 +28,61 @@ export enum RequestStatus {
   CANCELLED = "CANCELLED",
 }
 
+async function assertHouseholdHead(userId: number) {
+  const info = await query(
+    `SELECT u."personId", nk."hoKhauId", hk."chuHoId"
+     FROM users u
+     JOIN nhan_khau nk ON u."personId" = nk.id
+     JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+     WHERE u.id = $1`,
+    [userId]
+  );
+
+  if ((info?.rowCount ?? 0) === 0 || !info.rows[0].personId) {
+    throw {
+      status: 403,
+      code: "NOT_HEAD_OF_HOUSEHOLD",
+      message: "Chỉ chủ hộ đã liên kết mới được phép tạo yêu cầu",
+    };
+  }
+
+  const row = info.rows[0];
+  if (Number(row.chuHoId) !== Number(row.personId)) {
+    throw {
+      status: 403,
+      code: "NOT_HEAD_OF_HOUSEHOLD",
+      message: "Chỉ chủ hộ mới được phép tạo yêu cầu",
+    };
+  }
+
+  return {
+    personId: Number(row.personId),
+    householdId: Number(row.hoKhauId),
+  };
+}
+
+async function ensurePersonInHousehold(personId: number, householdId: number) {
+  const person = await query(
+    `SELECT id, "hoKhauId", "trangThai" FROM nhan_khau WHERE id = $1`,
+    [personId]
+  );
+
+  if ((person?.rowCount ?? 0) === 0) {
+    throw { status: 404, code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
+  }
+
+  const row = person.rows[0];
+  if (Number(row.hoKhauId) !== Number(householdId)) {
+    throw {
+      status: 403,
+      code: "PERSON_OUTSIDE_HOUSEHOLD",
+      message: "Bạn chỉ có thể gửi yêu cầu cho nhân khẩu trong hộ khẩu của mình",
+    };
+  }
+
+  return row;
+}
+
 /**
  * POST /requests
  * Tạo yêu cầu mới (chỉ dành cho người dân)
@@ -40,6 +95,27 @@ router.post(
     try {
       const userId = req.user!.id;
       let { type, targetHouseholdId, targetPersonId, payload } = req.body;
+
+      let headContext: { personId: number; householdId: number };
+      try {
+        headContext = await assertHouseholdHead(userId);
+      } catch (err: any) {
+        return res.status(err.status || 403).json({
+          success: false,
+          error: {
+            code: err.code || "NOT_HEAD_OF_HOUSEHOLD",
+            message:
+              err.message || "Chỉ chủ hộ đã liên kết mới được phép tạo yêu cầu",
+          },
+        });
+      }
+
+      let finalTargetHouseholdId: number | null = targetHouseholdId
+        ? Number(targetHouseholdId)
+        : null;
+      let finalTargetPersonId: number | null = targetPersonId
+        ? Number(targetPersonId)
+        : null;
       // Debug: log incoming create request for troubleshooting
       try {
         console.log(
@@ -83,6 +159,19 @@ router.post(
         });
       }
 
+      if (
+        finalTargetHouseholdId &&
+        Number(finalTargetHouseholdId) !== Number(headContext.householdId)
+      ) {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: "FORBIDDEN",
+            message: "Bạn chỉ có thể gửi yêu cầu cho hộ khẩu của mình",
+          },
+        });
+      }
+
       // Normalize payload: accept JSON string or object. If string, parse it.
       if (payload && typeof payload === "string") {
         try {
@@ -109,59 +198,114 @@ router.post(
         });
       }
 
-      // Validate targetHouseholdId nếu có (chỉ áp dụng cho user đã linked)
-      if (targetHouseholdId) {
-        // Kiểm tra xem user đã linked chưa (personId)
-        const userLinkCheck = await query(
-          `SELECT "personId" FROM users WHERE id = $1`,
-          [userId]
-        );
-
-        const personId = userLinkCheck.rows[0]?.personId ?? null;
-        const isUserLinked = !!personId;
-
-        if (isUserLinked) {
-          // User đã linked thì phải validate household thuộc về họ
-          // Trước đây code so sánh nhan_khau."userId" = userId (sai) — phải so sánh nhan_khau.id = personId
-          const householdCheck = await query(
-            `SELECT hk.id FROM ho_khau hk
-           INNER JOIN nhan_khau nk ON hk.id = nk."hoKhauId"
-           WHERE hk.id = $1 AND nk.id = $2 LIMIT 1`,
-            [targetHouseholdId, personId]
-          );
-
-          if ((householdCheck?.rowCount ?? 0) === 0) {
-            return res.status(403).json({
-              success: false,
-              error: {
-                code: "FORBIDDEN",
-                message: "Hộ khẩu không thuộc quyền quản lý của bạn",
-              },
-            });
-          }
-        }
-        // Nếu user chưa linked, cho phép họ chỉ định householdId (tổ trưởng sẽ verify)
-      }
-
       // Validate theo type
       let validationError = null;
       if (type === RequestType.ADD_NEWBORN) {
         validationError = validateAddNewbornPayload(payload);
+        finalTargetHouseholdId = headContext.householdId;
+        if (payload?.newborn) {
+          payload.newborn.householdId = headContext.householdId;
+        } else {
+          payload.householdId = headContext.householdId;
+        }
       } else if (type === RequestType.ADD_PERSON) {
-        validationError = validateAddPersonPayload(
-          payload,
-          !!targetHouseholdId
-        );
+        validationError = validateAddPersonPayload(payload, true);
+        finalTargetHouseholdId = headContext.householdId;
+        if (payload?.person) {
+          payload.person.householdId = headContext.householdId;
+        }
       } else if (
         type === RequestType.TEMPORARY_RESIDENCE ||
         type === "TAM_TRU"
       ) {
         validationError = validateTemporaryResidencePayload(payload);
+        const nhanKhauId =
+          payload?.nhanKhauId || payload?.residence?.nhanKhauId || null;
+        if (nhanKhauId) {
+          try {
+            await ensurePersonInHousehold(Number(nhanKhauId), headContext.householdId);
+          } catch (err: any) {
+            return res.status(err.status || 400).json({
+              success: false,
+              error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+            });
+          }
+          finalTargetPersonId = Number(nhanKhauId);
+        }
       } else if (
         type === RequestType.TEMPORARY_ABSENCE ||
         type === "TAM_VANG"
       ) {
         validationError = validateTemporaryAbsencePayload(payload);
+        const nhanKhauId =
+          payload?.nhanKhauId || payload?.absence?.nhanKhauId || null;
+        if (nhanKhauId) {
+          try {
+            await ensurePersonInHousehold(Number(nhanKhauId), headContext.householdId);
+          } catch (err: any) {
+            return res.status(err.status || 400).json({
+              success: false,
+              error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+            });
+          }
+          finalTargetPersonId = Number(nhanKhauId);
+        }
+      } else if (type === RequestType.SPLIT_HOUSEHOLD) {
+        validationError = validateSplitHouseholdPayload(payload);
+        const targetHoKhauId = payload?.hoKhauId || headContext.householdId;
+        if (Number(targetHoKhauId) !== Number(headContext.householdId)) {
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: "FORBIDDEN",
+              message: "Bạn chỉ có thể tách hộ cho chính hộ khẩu của mình",
+            },
+          });
+        }
+
+        const selectedIds: number[] = payload?.selectedNhanKhauIds || [];
+        if (selectedIds.length > 0) {
+          const members = await query(
+            `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 AND id = ANY($2::int[])`,
+            [headContext.householdId, selectedIds]
+          );
+          if ((members?.rowCount ?? 0) !== selectedIds.length) {
+            return res.status(403).json({
+              success: false,
+              error: {
+                code: "PERSON_OUTSIDE_HOUSEHOLD",
+                message: "Tất cả nhân khẩu tách hộ phải thuộc hộ khẩu của bạn",
+              },
+            });
+          }
+        }
+
+        if (payload?.newChuHoId && !selectedIds.includes(Number(payload.newChuHoId))) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "Chủ hộ mới phải nằm trong danh sách nhân khẩu tách",
+            },
+          });
+        }
+
+        finalTargetHouseholdId = headContext.householdId;
+        payload.hoKhauId = headContext.householdId;
+      } else if (type === RequestType.DECEASED) {
+        validationError = validateDeceasedPayload(payload);
+        const nhanKhauId = payload?.nhanKhauId || payload?.personId;
+        if (nhanKhauId) {
+          try {
+            await ensurePersonInHousehold(Number(nhanKhauId), headContext.householdId);
+          } catch (err: any) {
+            return res.status(err.status || 400).json({
+              success: false,
+              error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+            });
+          }
+          finalTargetPersonId = Number(nhanKhauId);
+        }
       } else {
         return res.status(400).json({
           success: false,
@@ -190,8 +334,8 @@ router.post(
         [
           userId,
           type,
-          targetHouseholdId || null,
-          targetPersonId || null,
+          finalTargetHouseholdId || null,
+          finalTargetPersonId || null,
           JSON.stringify(payload),
         ]
       );
@@ -238,7 +382,6 @@ router.get(
     try {
       const {
         type,
-        status,
         fromDate,
         toDate,
         keyword,
@@ -247,7 +390,6 @@ router.get(
       } = req.query;
       console.log("[GET /tam-tru-vang/requests] query:", {
         type,
-        status,
         fromDate,
         toDate,
         keyword,
@@ -270,17 +412,6 @@ router.get(
       if (type && String(type).toLowerCase() !== "all") {
         whereClause += ` AND r.type = $${idx}`;
         params.push(String(type).toUpperCase());
-        idx++;
-      }
-
-      if (status && String(status).toLowerCase() !== "all") {
-        whereClause += ` AND r.status = $${idx}`;
-        params.push(String(status).toUpperCase());
-        idx++;
-      } else {
-        // default to PENDING if not provided
-        whereClause += ` AND r.status = $${idx}`;
-        params.push("PENDING");
         idx++;
       }
 
@@ -307,29 +438,18 @@ router.get(
         idx++;
       }
 
-      // count total
-      const countQuery = `
-      SELECT COUNT(*) as total
-      FROM requests r
-      LEFT JOIN nhan_khau nk ON r."targetPersonId" = nk.id
-      LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
-      ${whereClause}
-    `;
-      const countResult = await query(countQuery, params);
-      const total = parseInt(countResult.rows[0].total || "0");
-
       const pageNum = Math.max(1, parseInt(String(page)));
       const perPage = Math.max(1, Math.min(200, parseInt(String(limit))));
       const offset = (pageNum - 1) * perPage;
-
-      // select normalized fields including payload jsonb extraction
       const selectQuery = `
       SELECT
         r.id, r.type, r.status, r."createdAt", r."reviewedAt", r."reviewedBy", r."rejectionReason",
         r."requesterUserId",
+        r.payload as "payloadRaw",
         (r.payload->>'tuNgay') as "tuNgay",
         (r.payload->>'denNgay') as "denNgay",
         (r.payload->>'lyDo') as "lyDo",
+        (r.payload->>'diaChi') as "diaChi",
         NULLIF(r.payload->>'nhanKhauId','')::int as "nhanKhauId",
         u."fullName" as "requesterName",
         nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
@@ -340,65 +460,149 @@ router.get(
       LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
       ${whereClause}
       ORDER BY r."createdAt" DESC
-      LIMIT $${idx} OFFSET $${idx + 1}
     `;
-      params.push(perPage);
-      params.push(offset);
 
-      const result = await query(selectQuery, params);
+      const requestRows = (await query(selectQuery, params)).rows;
 
-      console.log(
-        "[GET /requests] role:",
-        req.user?.role,
-        "userId:",
-        req.user?.id,
-        "returned:",
-        result?.rows?.length ?? 0
-      );
+      const tamTruVangFilters: any[] = [];
+      let ttvWhere = "WHERE 1=1";
+      if (type && String(type).toLowerCase() !== "all") {
+        ttvWhere += " AND ttv.loai = $" + (tamTruVangFilters.length + 1);
+        tamTruVangFilters.push(
+          String(type).toUpperCase().includes("VANG") ? "tam_vang" : "tam_tru"
+        );
+      }
+      if (fromDate) {
+        ttvWhere +=
+          ' AND ttv."createdAt" >= $' + (tamTruVangFilters.length + 1);
+        tamTruVangFilters.push(fromDate);
+      }
+      if (toDate) {
+        ttvWhere +=
+          ' AND ttv."createdAt" <= $' + (tamTruVangFilters.length + 1);
+        tamTruVangFilters.push(toDate);
+      }
+      if (keyword && String(keyword).trim()) {
+        const kw = `%${String(keyword).trim()}%`;
+        ttvWhere += ` AND (nk."hoTen" ILIKE $${
+          tamTruVangFilters.length + 1
+        } OR nk.cccd ILIKE $${
+          tamTruVangFilters.length + 1
+        } OR hk."soHoKhau" ILIKE $${
+          tamTruVangFilters.length + 1
+        } OR hk."diaChi" ILIKE $${tamTruVangFilters.length + 1})`;
+        tamTruVangFilters.push(kw);
+      }
 
-      const items = result.rows.map((row: any) => {
-        let attachments = [];
-        try {
-          const parsedPayload =
-            typeof row.payload === "string"
-              ? JSON.parse(row.payload)
-              : row.payload;
-          attachments = parsedPayload?.attachments || [];
-        } catch (e) {
-          attachments = [];
-        }
+      const ttvQuery = `
+        SELECT
+          ttv.id,
+          CASE WHEN ttv.loai = 'tam_tru' THEN 'TEMPORARY_RESIDENCE' ELSE 'TEMPORARY_ABSENCE' END AS type,
+          CASE ttv."trangThai"
+            WHEN 'cho_duyet' THEN 'PENDING'
+            WHEN 'da_duyet' THEN 'APPROVED'
+            WHEN 'tu_choi' THEN 'REJECTED'
+            ELSE ttv."trangThai"
+          END AS status,
+          ttv."createdAt",
+          ttv."updatedAt" AS "reviewedAt",
+          ttv."nguoiDuyet" AS "reviewedBy",
+          NULL::text AS "rejectionReason",
+          ttv."nguoiDangKy" AS "requesterUserId",
+          NULL::jsonb AS "payloadRaw",
+          ttv."tuNgay" AS "tuNgay",
+          ttv."denNgay" AS "denNgay",
+          ttv."lyDo" AS "lyDo",
+          ttv."diaChi" AS "diaChi",
+          ttv."nhanKhauId" AS "nhanKhauId",
+          u."fullName" AS "requesterName",
+          nk.id AS "personId", nk."hoTen" AS "personName", nk.cccd AS "personCccd",
+          hk.id AS "householdId", hk."soHoKhau" AS "householdCode", hk."diaChi" AS "householdAddress"
+        FROM tam_tru_vang ttv
+        LEFT JOIN users u ON ttv."nguoiDangKy" = u.id
+        LEFT JOIN nhan_khau nk ON ttv."nhanKhauId" = nk.id
+        LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+        ${ttvWhere}
+        ORDER BY ttv."createdAt" DESC
+      `;
 
-        return {
-          id: row.id,
-          type: row.type,
-          status: row.status,
-          tuNgay: row.tuNgay,
-          denNgay: row.denNgay,
-          lyDo: row.lyDo,
-          nhanKhauId: row.nhanKhauId,
-          requesterUserId: row.requesterUserId,
-          rejectionReason: row.rejectionReason,
-          reviewedBy: row.reviewedBy,
-          reviewedAt: row.reviewedAt,
-          createdAt: row.createdAt,
-          requesterName: row.requesterName,
-          person: row.personId
-            ? { id: row.personId, hoTen: row.personName, cccd: row.personCccd }
-            : null,
-          household: row.householdId
-            ? {
-                id: row.householdId,
-                soHoKhau: row.householdCode,
-                diaChi: row.householdAddress,
-              }
-            : null,
-          attachments: attachments,
-        };
-      });
+      const ttvRows = (await query(ttvQuery, tamTruVangFilters)).rows;
+
+      const combinedRows = [...requestRows, ...ttvRows];
+
+      const items = combinedRows
+        .map((row: any) => {
+          let payload: any = {};
+          let attachments = [];
+          try {
+            payload =
+              typeof row.payloadRaw === "string"
+                ? JSON.parse(row.payloadRaw)
+                : row.payloadRaw || {};
+            attachments = payload?.attachments || [];
+          } catch (e) {
+            payload = {};
+            attachments = [];
+          }
+
+          payload = {
+            ...payload,
+            tuNgay: payload.tuNgay || row.tuNgay || null,
+            denNgay: payload.denNgay || row.denNgay || null,
+            lyDo: payload.lyDo || row.lyDo || null,
+            diaChi: payload.diaChi || row.diaChi || null,
+          };
+
+          const nguoiGui = {
+            hoTen: row.requesterName || row.personName || null,
+            username: row.personCccd || null,
+            cccd: row.personCccd || null,
+          };
+
+          return {
+            id: row.id,
+            type: row.type,
+            status: row.status,
+            tuNgay: row.tuNgay,
+            denNgay: row.denNgay,
+            lyDo: row.lyDo,
+            nhanKhauId: row.nhanKhauId,
+            nguoiGui,
+            requesterUserId: row.requesterUserId,
+            rejectionReason: row.rejectionReason,
+            reviewedBy: row.reviewedBy,
+            reviewedAt: row.reviewedAt,
+            createdAt: row.createdAt,
+            payload,
+            requesterName: row.requesterName,
+            person: row.personId
+              ? {
+                  id: row.personId,
+                  hoTen: row.personName,
+                  cccd: row.personCccd,
+                }
+              : null,
+            household: row.householdId
+              ? {
+                  id: row.householdId,
+                  soHoKhau: row.householdCode,
+                  diaChi: row.householdAddress,
+                }
+              : null,
+            attachments: attachments,
+          };
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+
+      const total = items.length;
+      const paged = items.slice(offset, offset + perPage);
 
       return res.json({
         success: true,
-        data: items,
+        data: paged,
         pagination: {
           page: pageNum,
           limit: perPage,
@@ -855,6 +1059,65 @@ function validateTemporaryAbsencePayload(payload: any): string | null {
   // Validate lyDo is not empty
   if (absenceData.lyDo.trim().length === 0) {
     return "lyDo không được để trống";
+  }
+
+  return null;
+}
+
+function validateSplitHouseholdPayload(payload: any): string | null {
+  if (!payload || typeof payload !== "object") {
+    return "Thiếu dữ liệu tách hộ";
+  }
+
+  if (!Array.isArray(payload.selectedNhanKhauIds) || payload.selectedNhanKhauIds.length === 0) {
+    return "Vui lòng chọn ít nhất một nhân khẩu cần tách";
+  }
+
+  if (!payload.newChuHoId) {
+    return "Vui lòng chọn chủ hộ mới cho hộ được tách";
+  }
+
+  if (!payload.newAddress || String(payload.newAddress).trim() === "") {
+    return "Vui lòng nhập địa chỉ hộ khẩu mới";
+  }
+
+  if (!payload.expectedDate) {
+    return "Vui lòng chọn ngày dự kiến tách hộ";
+  }
+
+  const expectedDate = new Date(payload.expectedDate);
+  if (isNaN(expectedDate.getTime())) {
+    return "Ngày dự kiến tách hộ không hợp lệ";
+  }
+
+  if (!payload.reason || String(payload.reason).trim() === "") {
+    return "Vui lòng nhập lý do tách hộ";
+  }
+
+  return null;
+}
+
+function validateDeceasedPayload(payload: any): string | null {
+  if (!payload || typeof payload !== "object") {
+    return "Thiếu dữ liệu khai tử";
+  }
+
+  const nhanKhauId = payload.nhanKhauId || payload.personId;
+  if (!nhanKhauId || !Number.isInteger(Number(nhanKhauId))) {
+    return "Vui lòng chọn nhân khẩu cần khai tử";
+  }
+
+  if (!payload.ngayMat) {
+    return "Vui lòng nhập ngày mất";
+  }
+
+  const ngayMatDate = new Date(payload.ngayMat);
+  if (isNaN(ngayMatDate.getTime())) {
+    return "Ngày mất không hợp lệ";
+  }
+
+  if (!payload.lyDo || String(payload.lyDo).trim() === "") {
+    return "Vui lòng nhập lý do/ghi chú khai tử";
   }
 
   return null;
@@ -1354,6 +1617,8 @@ function getApprovalHandler(type: string): ApprovalHandler | null {
     [RequestType.ADD_PERSON]: processAddPersonApproval,
     [RequestType.TEMPORARY_RESIDENCE]: processTemporaryResidenceApproval,
     [RequestType.TEMPORARY_ABSENCE]: processTemporaryAbsenceApproval,
+    [RequestType.SPLIT_HOUSEHOLD]: processSplitHouseholdApproval,
+    [RequestType.DECEASED]: processDeceasedApproval,
     // legacy keys
     ["TAM_TRU" as any]: processTemporaryResidenceApproval,
     ["TAM_VANG" as any]: processTemporaryAbsenceApproval,
@@ -1843,6 +2108,78 @@ async function processTemporaryAbsenceApproval(
     ]);
 
     await query("COMMIT");
+  } catch (err) {
+    await query("ROLLBACK");
+    throw err;
+  }
+}
+
+async function processSplitHouseholdApproval(
+  requestId: number,
+  payload: any,
+  reviewerId: number,
+  targetHouseholdId?: number
+) {
+  return {
+    acknowledged: true,
+    message:
+      "Yêu cầu tách hộ đã được ghi nhận. Vui lòng thực hiện thao tác tách hộ khẩu trên hệ thống quản trị.",
+    targetHouseholdId: targetHouseholdId || payload?.hoKhauId || null,
+  };
+}
+
+async function processDeceasedApproval(
+  requestId: number,
+  payload: any,
+  reviewerId: number,
+  targetHouseholdId?: number,
+  targetPersonId?: number
+) {
+  await query("BEGIN");
+
+  try {
+    const nhanKhauId = targetPersonId || payload?.nhanKhauId || payload?.personId;
+    if (!nhanKhauId) {
+      throw { code: "VALIDATION_ERROR", message: "Thiếu nhân khẩu cần khai tử" };
+    }
+
+    const person = await query(
+      `SELECT id, "trangThai" FROM nhan_khau WHERE id = $1`,
+      [nhanKhauId]
+    );
+
+    if ((person?.rowCount ?? 0) === 0) {
+      throw { code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
+    }
+
+    if (String(person.rows[0].trangThai) === "khai_tu") {
+      throw { code: "ALREADY_DECEASED", message: "Nhân khẩu đã được khai tử" };
+    }
+
+    const ngayMat = normalizeDateOnly(
+      payload?.ngayMat || payload?.dateOfDeath || getCurrentDateString()
+    );
+    const lyDo = (payload?.lyDo || payload?.reason || "Khai tử").toString();
+    const noiMat = payload?.noiMat || payload?.diaDiem || null;
+
+    await query(
+      `UPDATE nhan_khau SET "trangThai" = 'khai_tu', "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1`,
+      [nhanKhauId]
+    );
+
+    await query(
+      `INSERT INTO bien_dong (
+        "nhanKhauId", loai, "ngayThucHien", "noiDung", "diaChiCu", "diaChiMoi",
+        "nguoiThucHien", "canBoXacNhan", "trangThai", "ghiChu"
+      ) VALUES (
+        $1, 'khai_tu', $2, $3, NULL, NULL,
+        $4, $4, 'da_duyet', $5
+      )`,
+      [nhanKhauId, ngayMat, lyDo, reviewerId, noiMat || null]
+    );
+
+    await query("COMMIT");
+    return { personId: nhanKhauId, ngayMat, lyDo, noiMat };
   } catch (err) {
     await query("ROLLBACK");
     throw err;

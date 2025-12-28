@@ -30,6 +30,7 @@ export interface AuthResponse {
         personId: number;
         hoTen: string;
         householdId: number;
+        isHeadOfHousehold?: boolean;
       };
       message?: string; // Thông báo khi chưa linked
     };
@@ -65,6 +66,7 @@ export interface UserInfo {
     personId: number;
     hoTen: string;
     householdId: number;
+    isHeadOfHousehold?: boolean;
   };
   message?: string; // Thông báo khi chưa linked
 }
@@ -443,7 +445,7 @@ class ApiService {
     return this.searchNhanKhau(q, limit, 0);
   }
 
-  async createRequest(data: { type: string; payload: any }) {
+  async createRequest(data: { type: string; payload: any; targetHouseholdId?: number; targetPersonId?: number }) {
     return this.request<{ success: boolean; data: any }>("/requests", {
       method: "POST",
       body: JSON.stringify(data),
@@ -566,7 +568,8 @@ class ApiService {
       return await this.request<{ success: boolean; data: any }>("/requests", {
         method: "POST",
         body: JSON.stringify({
-          type: "TACH_HO_KHAU",
+          type: "SPLIT_HOUSEHOLD",
+          targetHouseholdId: data.hoKhauId,
           payload: data,
         }),
       });

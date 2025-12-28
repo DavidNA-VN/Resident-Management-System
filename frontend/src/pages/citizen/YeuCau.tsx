@@ -18,6 +18,7 @@ interface Household {
   diaChi: string;
   diaChiDayDu?: string;
   chuHo?: {
+    id?: number;
     hoTen: string;
     cccd?: string;
   };
@@ -41,6 +42,8 @@ const requestTypeLabels: Record<string, string> = {
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
   SUA_NHAN_KHAU: "Sửa thông tin nhân khẩu",
   XOA_NHAN_KHAU: "Xoá nhân khẩu",
+  SPLIT_HOUSEHOLD: "Yêu cầu tách hộ khẩu",
+  DECEASED: "Xác nhận qua đời",
 };
 
 const statusLabels: Record<string, string> = {
@@ -64,7 +67,7 @@ const statusColors: Record<string, string> = {
 };
 
 export default function YeuCau() {
-  const [selectedType, setSelectedType] = useState<RequestType | "TACH_HO_KHAU" | "ADD_NEWBORN" | "ADD_PERSON" | null>(null);
+  const [selectedType, setSelectedType] = useState<RequestType | "TACH_HO_KHAU" | "ADD_NEWBORN" | "ADD_PERSON" | "DECEASED" | null>(null);
   const [showAddNewbornModal, setShowAddNewbornModal] = useState(false);
   const [showAddPersonModal, setShowAddPersonModal] = useState(false);
   const [userInfo, setUserInfo] = useState<any>(null);
@@ -75,6 +78,8 @@ export default function YeuCau() {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHousehold, setIsLoadingHousehold] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const isHeadOfHousehold = userInfo?.personInfo?.isHeadOfHousehold === true;
 
   useEffect(() => {
     loadUserInfo();
@@ -169,16 +174,26 @@ export default function YeuCau() {
     const typeMapping: Record<string, string> = {
       "TAM_TRU": "TEMPORARY_RESIDENCE",
       "TAM_VANG": "TEMPORARY_ABSENCE",
-      "TACH_HO_KHAU": "TACH_HO_KHAU",
+      "TACH_HO_KHAU": "SPLIT_HOUSEHOLD",
       "SUA_NHAN_KHAU": "SUA_NHAN_KHAU",
       "XOA_NHAN_KHAU": "XOA_NHAN_KHAU",
+      "DECEASED": "DECEASED",
     };
 
     const backendType = typeMapping[data.type] || data.type;
 
+    const targetPersonId =
+      data.payload?.nhanKhauId || data.payload?.targetPersonId || null;
+
     const response = await apiService.createRequest({
       type: backendType,
-      payload: data.payload
+      payload: data.payload,
+      targetPersonId:
+        backendType === "TEMPORARY_RESIDENCE" ||
+        backendType === "TEMPORARY_ABSENCE" ||
+        backendType === "DECEASED"
+          ? targetPersonId || undefined
+          : undefined,
     });
     if (response.success) {
       setSuccess("Gửi yêu cầu thành công!");
@@ -209,7 +224,7 @@ export default function YeuCau() {
     try {
       const payload = {
         type: "ADD_NEWBORN",
-        targetHouseholdId: data.householdId,
+        targetHouseholdId: data.householdId ? Number(data.householdId) : householdInfo?.id,
         payload: {
           newborn: {
             hoTen: data.hoTen,
@@ -265,9 +280,13 @@ export default function YeuCau() {
         }
       };
 
-      // Chỉ thêm targetHouseholdId nếu có giá trị và không phải empty string
-      if (data.householdId && data.householdId !== "") {
-        payload.targetHouseholdId = parseInt(data.householdId);
+      const resolvedHouseholdId =
+        (data.householdId && data.householdId !== ""
+          ? parseInt(data.householdId, 10)
+          : householdInfo?.id) || null;
+
+      if (resolvedHouseholdId) {
+        payload.targetHouseholdId = resolvedHouseholdId;
       }
 
       // Thêm quanHe nếu user chưa linked
@@ -292,6 +311,7 @@ export default function YeuCau() {
   const requestTypes: Array<{ type: RequestType | "TACH_HO_KHAU" | "ADD_NEWBORN" | "ADD_PERSON"; label: string; icon: string }> = [
     { type: "ADD_PERSON", label: "Thêm nhân khẩu", icon: "👤" },
     { type: "ADD_NEWBORN", label: "Thêm con sơ sinh", icon: "👶" },
+    { type: "DECEASED" as RequestType, label: "Xác nhận qua đời", icon: "⚰️" },
     { type: "TAM_VANG", label: "Xin tạm vắng", icon: "📍" },
     { type: "TAM_TRU", label: "Xin tạm trú", icon: "🏠" },
     { type: "TACH_HO_KHAU", label: "Yêu cầu tách hộ khẩu", icon: "🔄" },

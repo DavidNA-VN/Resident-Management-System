@@ -257,6 +257,27 @@ router.post("/citizen/tam-tru-vang", requireAuth, requireRole(["nguoi_dan"]), up
     const userId = req.user!.id;
     const { loai, nhanKhauId, tuNgay, denNgay, diaChi, lyDo } = req.body;
 
+    const headInfo = await query(
+      `SELECT u."personId", nk."hoKhauId", hk."chuHoId"
+       FROM users u
+       JOIN nhan_khau nk ON u."personId" = nk.id
+       JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+       WHERE u.id = $1`,
+      [userId]
+    );
+
+    if ((headInfo?.rowCount ?? 0) === 0 || !headInfo.rows[0].personId || Number(headInfo.rows[0].personId) !== Number(headInfo.rows[0].chuHoId)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "NOT_HEAD_OF_HOUSEHOLD",
+          message: "Chỉ chủ hộ đã liên kết mới được phép tạo yêu cầu",
+        },
+      });
+    }
+
+    const headHouseholdId = Number(headInfo.rows[0].hoKhauId);
+
     // Validate required fields
     if (!loai || !nhanKhauId || !tuNgay || !diaChi || !lyDo) {
       return res.status(400).json({
@@ -300,24 +321,13 @@ router.post("/citizen/tam-tru-vang", requireAuth, requireRole(["nguoi_dan"]), up
 
     const nhanKhau = nhanKhauCheck.rows[0];
 
-    // Check if user is linked to this household (either as the person or as head of household)
-    const userLinkCheck = await query(
-      `SELECT "personId" FROM users WHERE id = $1`,
-      [userId]
-    );
-
-    const currentPersonId = userLinkCheck.rows[0]?.personId ?? null;
-    const isLinkedToPerson = currentPersonId == nhanKhauId;
-    // ho_khau.chuHoId stored as chuHoId was selected into nhanKhau via join; use nhanKhau.chuHoId
-    const isHeadOfHousehold = currentPersonId && (nhanKhau.chuHoId ?? null) && Number(currentPersonId) === Number(nhanKhau.chuHoId);
-
-    if (!isLinkedToPerson && !isHeadOfHousehold) {
+    if (Number(nhanKhau.hoKhauId) !== headHouseholdId) {
       return res.status(403).json({
         success: false,
         error: {
           code: "FORBIDDEN",
-          message: "Bạn không có quyền tạo yêu cầu cho nhân khẩu này"
-        }
+          message: "Bạn chỉ có thể tạo yêu cầu cho nhân khẩu trong hộ khẩu của mình",
+        },
       });
     }
 

@@ -303,6 +303,14 @@ export default function NhanKhau() {
       return formatGioiTinhValue(value);
     }
 
+    if (field === "trangThai") {
+      const key = String(value || "").toLowerCase();
+      if (key === "active") return "Thường trú";
+      if (key === "tam_tru") return "Tạm trú";
+      if (key === "tam_vang") return "Tạm vắng";
+      return value;
+    }
+
     const dateFields = new Set([
       "ngayCapCCCD",
       "ngaySinh",
