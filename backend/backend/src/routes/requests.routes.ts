@@ -68,7 +68,11 @@ async function ensurePersonInHousehold(personId: number, householdId: number) {
   );
 
   if ((person?.rowCount ?? 0) === 0) {
-    throw { status: 404, code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
+    throw {
+      status: 404,
+      code: "PERSON_NOT_FOUND",
+      message: "Nhân khẩu không tồn tại",
+    };
   }
 
   const row = person.rows[0];
@@ -76,7 +80,8 @@ async function ensurePersonInHousehold(personId: number, householdId: number) {
     throw {
       status: 403,
       code: "PERSON_OUTSIDE_HOUSEHOLD",
-      message: "Bạn chỉ có thể gửi yêu cầu cho nhân khẩu trong hộ khẩu của mình",
+      message:
+        "Bạn chỉ có thể gửi yêu cầu cho nhân khẩu trong hộ khẩu của mình",
     };
   }
 
@@ -223,11 +228,17 @@ router.post(
           payload?.nhanKhauId || payload?.residence?.nhanKhauId || null;
         if (nhanKhauId) {
           try {
-            await ensurePersonInHousehold(Number(nhanKhauId), headContext.householdId);
+            await ensurePersonInHousehold(
+              Number(nhanKhauId),
+              headContext.householdId
+            );
           } catch (err: any) {
             return res.status(err.status || 400).json({
               success: false,
-              error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+              error: {
+                code: err.code || "VALIDATION_ERROR",
+                message: err.message,
+              },
             });
           }
           finalTargetPersonId = Number(nhanKhauId);
@@ -241,11 +252,17 @@ router.post(
           payload?.nhanKhauId || payload?.absence?.nhanKhauId || null;
         if (nhanKhauId) {
           try {
-            await ensurePersonInHousehold(Number(nhanKhauId), headContext.householdId);
+            await ensurePersonInHousehold(
+              Number(nhanKhauId),
+              headContext.householdId
+            );
           } catch (err: any) {
             return res.status(err.status || 400).json({
               success: false,
-              error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+              error: {
+                code: err.code || "VALIDATION_ERROR",
+                message: err.message,
+              },
             });
           }
           finalTargetPersonId = Number(nhanKhauId);
@@ -280,7 +297,10 @@ router.post(
           }
         }
 
-        if (payload?.newChuHoId && !selectedIds.includes(Number(payload.newChuHoId))) {
+        if (
+          payload?.newChuHoId &&
+          !selectedIds.includes(Number(payload.newChuHoId))
+        ) {
           return res.status(400).json({
             success: false,
             error: {
@@ -297,11 +317,17 @@ router.post(
         const nhanKhauId = payload?.nhanKhauId || payload?.personId;
         if (nhanKhauId) {
           try {
-            await ensurePersonInHousehold(Number(nhanKhauId), headContext.householdId);
+            await ensurePersonInHousehold(
+              Number(nhanKhauId),
+              headContext.householdId
+            );
           } catch (err: any) {
             return res.status(err.status || 400).json({
               success: false,
-              error: { code: err.code || "VALIDATION_ERROR", message: err.message },
+              error: {
+                code: err.code || "VALIDATION_ERROR",
+                message: err.message,
+              },
             });
           }
           finalTargetPersonId = Number(nhanKhauId);
@@ -1069,7 +1095,10 @@ function validateSplitHouseholdPayload(payload: any): string | null {
     return "Thiếu dữ liệu tách hộ";
   }
 
-  if (!Array.isArray(payload.selectedNhanKhauIds) || payload.selectedNhanKhauIds.length === 0) {
+  if (
+    !Array.isArray(payload.selectedNhanKhauIds) ||
+    payload.selectedNhanKhauIds.length === 0
+  ) {
     return "Vui lòng chọn ít nhất một nhân khẩu cần tách";
   }
 
@@ -2138,9 +2167,13 @@ async function processDeceasedApproval(
   await query("BEGIN");
 
   try {
-    const nhanKhauId = targetPersonId || payload?.nhanKhauId || payload?.personId;
+    const nhanKhauId =
+      targetPersonId || payload?.nhanKhauId || payload?.personId;
     if (!nhanKhauId) {
-      throw { code: "VALIDATION_ERROR", message: "Thiếu nhân khẩu cần khai tử" };
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Thiếu nhân khẩu cần khai tử",
+      };
     }
 
     const person = await query(

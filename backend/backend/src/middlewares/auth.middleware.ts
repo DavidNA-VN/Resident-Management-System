@@ -34,7 +34,11 @@ declare global {
  * - Load user (role + task) from DB
  * - Attach req.user
  */
-export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
+export const requireAuth = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
     const auth = req.headers.authorization;
     if (!auth || !auth.startsWith("Bearer ")) {

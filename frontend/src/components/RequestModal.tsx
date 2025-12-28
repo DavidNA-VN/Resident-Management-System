@@ -5,10 +5,10 @@ export type RequestType =
   | "TAM_TRU"
   | "TACH_HO_KHAU"
   | "SUA_NHAN_KHAU"
-  | "XOA_NHAN_KHAU";
+  | "XOA_NHAN_KHAU"
+  | "DECEASED";
 
 // Focus the modal for keyboard accessibility
-
 
 interface RequestModalProps {
   isOpen: boolean;
@@ -25,6 +25,7 @@ const requestTypeLabels: Record<RequestType, string> = {
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
   SUA_NHAN_KHAU: "Sửa thông tin nhân khẩu",
   XOA_NHAN_KHAU: "Xoá nhân khẩu",
+  DECEASED: "Xác nhận qua đời",
 };
 
 export default function RequestModal({
@@ -67,9 +68,26 @@ export default function RequestModal({
     setError(null);
 
     // Validate
-    if (type === "TAM_VANG" || type === "TAM_TRU" || type === "SUA_NHAN_KHAU" || type === "XOA_NHAN_KHAU") {
+    if (
+      type === "TAM_VANG" ||
+      type === "TAM_TRU" ||
+      type === "SUA_NHAN_KHAU" ||
+      type === "XOA_NHAN_KHAU" ||
+      type === "DECEASED"
+    ) {
       if (!formData.nhanKhauId) {
         setError("Vui lòng chọn nhân khẩu");
+        return;
+      }
+    }
+
+    if (type === "DECEASED") {
+      if (!formData.ngayMat) {
+        setError("Vui lòng nhập ngày mất");
+        return;
+      }
+      if (!formData.lyDo || String(formData.lyDo).trim() === "") {
+        setError("Vui lòng nhập lý do/ghi chú");
         return;
       }
     }
@@ -81,7 +99,12 @@ export default function RequestModal({
       }
     }
 
-    if (type === "TAM_VANG" || type === "TAM_TRU" || type === "SUA_NHAN_KHAU" || type === "XOA_NHAN_KHAU") {
+    if (
+      type === "TAM_VANG" ||
+      type === "TAM_TRU" ||
+      type === "SUA_NHAN_KHAU" ||
+      type === "XOA_NHAN_KHAU"
+    ) {
       if (!formData.lyDo || formData.lyDo.trim() === "") {
         setError("Vui lòng nhập lý do");
         return;
@@ -123,7 +146,10 @@ export default function RequestModal({
       >
         {/* Header */}
         <div className="mb-6 flex items-center justify-between border-b border-gray-200 pb-4">
-          <h2 id="request-modal-title" className="text-2xl font-bold text-gray-900">
+          <h2
+            id="request-modal-title"
+            className="text-2xl font-bold text-gray-900"
+          >
             {requestTypeLabels[type]}
           </h2>
           <button
@@ -137,7 +163,8 @@ export default function RequestModal({
 
         {householdInfo && (
           <div className="mb-4 text-sm text-gray-600">
-            <span className="font-medium">Hộ khẩu:</span> {householdInfo.soHoKhau} — {householdInfo.diaChi}
+            <span className="font-medium">Hộ khẩu:</span>{" "}
+            {householdInfo.soHoKhau} — {householdInfo.diaChi}
           </div>
         )}
 
@@ -161,7 +188,10 @@ export default function RequestModal({
                   autoFocus
                   value={formData.nhanKhauId || ""}
                   onChange={(e) =>
-                    setFormData({ ...formData, nhanKhauId: Number(e.target.value) })
+                    setFormData({
+                      ...formData,
+                      nhanKhauId: Number(e.target.value),
+                    })
                   }
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   required
@@ -232,7 +262,10 @@ export default function RequestModal({
                   autoFocus
                   value={formData.nhanKhauId || ""}
                   onChange={(e) =>
-                    setFormData({ ...formData, nhanKhauId: Number(e.target.value) })
+                    setFormData({
+                      ...formData,
+                      nhanKhauId: Number(e.target.value),
+                    })
                   }
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   required
@@ -307,6 +340,82 @@ export default function RequestModal({
             </>
           )}
 
+          {type === "DECEASED" && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Chọn nhân khẩu cần xác nhận{" "}
+                  <span className="text-red-500">*</span>
+                </label>
+                <select
+                  autoFocus
+                  value={formData.nhanKhauId || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      nhanKhauId: Number(e.target.value),
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  required
+                >
+                  <option value="">-- Chọn nhân khẩu --</option>
+                  {nhanKhauList.map((nk) => (
+                    <option key={nk.id} value={nk.id}>
+                      {nk.hoTen}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ngày mất <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.ngayMat || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, ngayMat: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nơi mất
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.noiMat || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, noiMat: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    placeholder="Nhập địa điểm (nếu có)"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Ghi chú/Lý do <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={formData.lyDo || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, lyDo: e.target.value })
+                  }
+                  rows={3}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Mô tả ngắn gọn lý do, hồ sơ kèm theo nếu có"
+                  required
+                />
+              </div>
+            </>
+          )}
 
           {/* SUA_NHAN_KHAU */}
           {type === "SUA_NHAN_KHAU" && (
@@ -319,7 +428,10 @@ export default function RequestModal({
                   autoFocus
                   value={formData.nhanKhauId || ""}
                   onChange={(e) =>
-                    setFormData({ ...formData, nhanKhauId: Number(e.target.value) })
+                    setFormData({
+                      ...formData,
+                      nhanKhauId: Number(e.target.value),
+                    })
                   }
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   required
@@ -422,7 +534,10 @@ export default function RequestModal({
                 <select
                   value={formData.nhanKhauId || ""}
                   onChange={(e) =>
-                    setFormData({ ...formData, nhanKhauId: Number(e.target.value) })
+                    setFormData({
+                      ...formData,
+                      nhanKhauId: Number(e.target.value),
+                    })
                   }
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   required
@@ -476,4 +591,3 @@ export default function RequestModal({
     </div>
   );
 }
-

@@ -445,7 +445,12 @@ class ApiService {
     return this.searchNhanKhau(q, limit, 0);
   }
 
-  async createRequest(data: { type: string; payload: any; targetHouseholdId?: number; targetPersonId?: number }) {
+  async createRequest(data: {
+    type: string;
+    payload: any;
+    targetHouseholdId?: number;
+    targetPersonId?: number;
+  }) {
     return this.request<{ success: boolean; data: any }>("/requests", {
       method: "POST",
       body: JSON.stringify(data),

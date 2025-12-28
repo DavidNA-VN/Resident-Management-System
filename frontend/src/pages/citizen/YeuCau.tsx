@@ -44,6 +44,8 @@ const requestTypeLabels: Record<string, string> = {
   XOA_NHAN_KHAU: "Xoá nhân khẩu",
   SPLIT_HOUSEHOLD: "Yêu cầu tách hộ khẩu",
   DECEASED: "Xác nhận qua đời",
+  TEMPORARY_RESIDENCE: "Xin tạm trú",
+  TEMPORARY_ABSENCE: "Xin tạm vắng",
 };
 
 const statusLabels: Record<string, string> = {
@@ -67,7 +69,14 @@ const statusColors: Record<string, string> = {
 };
 
 export default function YeuCau() {
-  const [selectedType, setSelectedType] = useState<RequestType | "TACH_HO_KHAU" | "ADD_NEWBORN" | "ADD_PERSON" | "DECEASED" | null>(null);
+  const [selectedType, setSelectedType] = useState<
+    | RequestType
+    | "TACH_HO_KHAU"
+    | "ADD_NEWBORN"
+    | "ADD_PERSON"
+    | "DECEASED"
+    | null
+  >(null);
   const [showAddNewbornModal, setShowAddNewbornModal] = useState(false);
   const [showAddPersonModal, setShowAddPersonModal] = useState(false);
   const [userInfo, setUserInfo] = useState<any>(null);
@@ -117,7 +126,10 @@ export default function YeuCau() {
 
   // Load household data khi mở modal tách hộ khẩu hoặc thêm con sơ sinh
   useEffect(() => {
-    if ((selectedType === "TACH_HO_KHAU" || selectedType === "ADD_NEWBORN") && !householdInfo) {
+    if (
+      (selectedType === "TACH_HO_KHAU" || selectedType === "ADD_NEWBORN") &&
+      !householdInfo
+    ) {
       loadHouseholdData();
     }
   }, [selectedType]);
@@ -130,7 +142,8 @@ export default function YeuCau() {
       if (response.success && response.data) {
         // Adapt data structure
         const householdData = response.data.hoKhau || response.data.household;
-        const members = response.data.nhanKhauList || response.data.members || [];
+        const members =
+          response.data.nhanKhauList || response.data.members || [];
 
         setNhanKhauList(
           members.map((nk: any) => ({
@@ -170,14 +183,17 @@ export default function YeuCau() {
   };
 
   const handleSubmitRequest = async (data: { type: string; payload: any }) => {
+    if (!isHeadOfHousehold) {
+      throw new Error("Chỉ chủ hộ mới được phép tạo yêu cầu.");
+    }
     // Map UI type to backend enum
     const typeMapping: Record<string, string> = {
-      "TAM_TRU": "TEMPORARY_RESIDENCE",
-      "TAM_VANG": "TEMPORARY_ABSENCE",
-      "TACH_HO_KHAU": "SPLIT_HOUSEHOLD",
-      "SUA_NHAN_KHAU": "SUA_NHAN_KHAU",
-      "XOA_NHAN_KHAU": "XOA_NHAN_KHAU",
-      "DECEASED": "DECEASED",
+      TAM_TRU: "TEMPORARY_RESIDENCE",
+      TAM_VANG: "TEMPORARY_ABSENCE",
+      TACH_HO_KHAU: "SPLIT_HOUSEHOLD",
+      SUA_NHAN_KHAU: "SUA_NHAN_KHAU",
+      XOA_NHAN_KHAU: "XOA_NHAN_KHAU",
+      DECEASED: "DECEASED",
     };
 
     const backendType = typeMapping[data.type] || data.type;
@@ -204,7 +220,12 @@ export default function YeuCau() {
     }
   };
 
-  const handleSubmitSplitHousehold = async (data: SplitHouseholdRequestData) => {
+  const handleSubmitSplitHousehold = async (
+    data: SplitHouseholdRequestData
+  ) => {
+    if (!isHeadOfHousehold) {
+      throw new Error("Chỉ chủ hộ mới được phép tạo yêu cầu.");
+    }
     try {
       // TODO: Thay bằng createSplitHouseholdRequest() khi backend có endpoint /citizen/requests/split-household
       const response = await apiService.createSplitHouseholdRequest(data);
@@ -221,10 +242,15 @@ export default function YeuCau() {
   };
 
   const handleSubmitAddNewborn = async (data: any) => {
+    if (!isHeadOfHousehold) {
+      throw new Error("Chỉ chủ hộ mới được phép tạo yêu cầu.");
+    }
     try {
       const payload = {
         type: "ADD_NEWBORN",
-        targetHouseholdId: data.householdId ? Number(data.householdId) : householdInfo?.id,
+        targetHouseholdId: data.householdId
+          ? Number(data.householdId)
+          : householdInfo?.id,
         payload: {
           newborn: {
             hoTen: data.hoTen,
@@ -238,8 +264,8 @@ export default function YeuCau() {
             cccd: data.cccd || undefined,
             ghiChu: data.ghiChu || undefined,
             isMoiSinh: true,
-          }
-        }
+          },
+        },
       };
 
       const response = await apiService.createRequest(payload);
@@ -257,6 +283,9 @@ export default function YeuCau() {
   };
 
   const handleSubmitAddPerson = async (data: any) => {
+    if (!isHeadOfHousehold) {
+      throw new Error("Chỉ chủ hộ mới được phép tạo yêu cầu.");
+    }
     try {
       const payload: any = {
         type: "ADD_PERSON",
@@ -276,8 +305,8 @@ export default function YeuCau() {
             ngheNghiep: data.ngheNghiep || undefined,
             noiLamViec: data.noiLamViec || undefined,
             ghiChu: data.ghiChu || undefined,
-          }
-        }
+          },
+        },
       };
 
       const resolvedHouseholdId =
@@ -308,7 +337,16 @@ export default function YeuCau() {
     }
   };
 
-  const requestTypes: Array<{ type: RequestType | "TACH_HO_KHAU" | "ADD_NEWBORN" | "ADD_PERSON"; label: string; icon: string }> = [
+  const requestTypes: Array<{
+    type:
+      | RequestType
+      | "TACH_HO_KHAU"
+      | "ADD_NEWBORN"
+      | "ADD_PERSON"
+      | "DECEASED";
+    label: string;
+    icon: string;
+  }> = [
     { type: "ADD_PERSON", label: "Thêm nhân khẩu", icon: "👤" },
     { type: "ADD_NEWBORN", label: "Thêm con sơ sinh", icon: "👶" },
     { type: "DECEASED" as RequestType, label: "Xác nhận qua đời", icon: "⚰️" },
@@ -331,6 +369,13 @@ export default function YeuCau() {
         </p>
       </div>
 
+      {!isHeadOfHousehold && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800">
+          Chỉ tài khoản chủ hộ mới được gửi yêu cầu. Vui lòng đăng nhập bằng tài
+          khoản của chủ hộ hộ khẩu.
+        </div>
+      )}
+
       {/* Success Message */}
       {success && (
         <div className="rounded-lg bg-green-50 border border-green-200 p-4 text-green-700">
@@ -344,6 +389,7 @@ export default function YeuCau() {
           <button
             key={item.type}
             onClick={() => {
+              if (!isHeadOfHousehold) return;
               if (item.type === "ADD_NEWBORN") {
                 setShowAddNewbornModal(true);
               } else if (item.type === "ADD_PERSON") {
@@ -352,7 +398,11 @@ export default function YeuCau() {
                 setSelectedType(item.type);
               }
             }}
-            className="rounded-xl border border-gray-200/80 bg-white p-6 shadow-sm hover:shadow-lg hover:border-blue-300 transition-all duration-300 hover:-translate-y-1 text-left group"
+            disabled={!isHeadOfHousehold}
+            title={
+              isHeadOfHousehold ? undefined : "Chỉ chủ hộ được phép tạo yêu cầu"
+            }
+            className="rounded-xl border border-gray-200/80 bg-white p-6 shadow-sm hover:shadow-lg hover:border-blue-300 transition-all duration-300 hover:-translate-y-1 text-left group disabled:cursor-not-allowed disabled:opacity-60"
           >
             <div className="text-4xl mb-3 group-hover:scale-110 transition-transform">
               {item.icon}
@@ -360,9 +410,7 @@ export default function YeuCau() {
             <h3 className="text-lg font-semibold text-gray-900 mb-2">
               {item.label}
             </h3>
-            <p className="text-sm text-gray-500">
-              Nhấn để tạo yêu cầu mới
-            </p>
+            <p className="text-sm text-gray-500">Nhấn để tạo yêu cầu mới</p>
           </button>
         ))}
       </div>
@@ -406,24 +454,30 @@ export default function YeuCau() {
                     </p>
                     {request.payload?.lyDo && (
                       <p className="text-sm text-gray-700">
-                        <span className="font-medium">Lý do:</span> {request.payload.lyDo}
+                        <span className="font-medium">Lý do:</span>{" "}
+                        {request.payload.lyDo}
                       </p>
                     )}
-                    {request.status === "REJECTED" && request.rejectionReason && (
-                      <p className="text-sm text-red-700">
-                        <span className="font-medium">Lý do từ chối:</span> {request.rejectionReason}
-                      </p>
-                    )}
+                    {request.status === "REJECTED" &&
+                      request.rejectionReason && (
+                        <p className="text-sm text-red-700">
+                          <span className="font-medium">Lý do từ chối:</span>{" "}
+                          {request.rejectionReason}
+                        </p>
+                      )}
                     {request.status === "APPROVED" && request.reviewedAt && (
                       <p className="text-sm text-green-700">
                         <span className="font-medium">Đã duyệt:</span>{" "}
-                        {new Date(request.reviewedAt).toLocaleDateString("vi-VN")}
+                        {new Date(request.reviewedAt).toLocaleDateString(
+                          "vi-VN"
+                        )}
                       </p>
                     )}
                   </div>
                   <span
                     className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
-                      statusColors[request.status] || "bg-gray-100 text-gray-700"
+                      statusColors[request.status] ||
+                      "bg-gray-100 text-gray-700"
                     }`}
                   >
                     {statusLabels[request.status] || request.status}
@@ -438,14 +492,23 @@ export default function YeuCau() {
       {/* Modal cho các yêu cầu thông thường */}
       <RequestModal
         isOpen={selectedType !== null && selectedType !== "TACH_HO_KHAU"}
-        type={selectedType && selectedType !== "TACH_HO_KHAU" ? selectedType : null}
+        type={
+          selectedType && selectedType !== "TACH_HO_KHAU" ? selectedType : null
+        }
         onClose={() => setSelectedType(null)}
         onSubmit={handleSubmitRequest}
-        nhanKhauList={nhanKhauList.map((nk) => ({ id: nk.id, hoTen: nk.hoTen }))}
-        householdInfo={householdInfo ? {
-          soHoKhau: householdInfo.soHoKhau,
-          diaChi: householdInfo.diaChiDayDu || householdInfo.diaChi,
-        } : undefined}
+        nhanKhauList={nhanKhauList.map((nk) => ({
+          id: nk.id,
+          hoTen: nk.hoTen,
+        }))}
+        householdInfo={
+          householdInfo
+            ? {
+                soHoKhau: householdInfo.soHoKhau,
+                diaChi: householdInfo.diaChiDayDu || householdInfo.diaChi,
+              }
+            : undefined
+        }
       />
 
       {/* Modal riêng cho tách hộ khẩu */}
@@ -493,7 +556,14 @@ interface AddPersonModalProps {
   households: any[];
 }
 
-function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, households }: AddPersonModalProps) {
+function AddPersonModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  householdInfo,
+  userInfo,
+  households,
+}: AddPersonModalProps) {
   const [formData, setFormData] = useState({
     householdId: "",
     hoTen: "",
@@ -521,13 +591,13 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
     if (isOpen) {
       if (isUserLinked && householdInfo) {
         // User đã linked, tự động điền household của họ
-        setFormData(prev => ({
+        setFormData((prev) => ({
           ...prev,
           householdId: householdInfo.id.toString(),
         }));
       } else {
         // User chưa linked, để trống householdId
-        setFormData(prev => ({
+        setFormData((prev) => ({
           ...prev,
           householdId: "",
         }));
@@ -545,9 +615,11 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
       requiredFields.push("quanHe");
     }
 
-    const missingFields = requiredFields.filter(field => !formData[field]);
+    const missingFields = requiredFields.filter((field) => !formData[field]);
     if (missingFields.length > 0) {
-      setError(`Vui lòng điền đầy đủ các trường bắt buộc: ${missingFields.join(", ")}`);
+      setError(
+        `Vui lòng điền đầy đủ các trường bắt buộc: ${missingFields.join(", ")}`
+      );
       return;
     }
 
@@ -599,7 +671,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
             {isUserLinked ? (
               <input
                 type="text"
-                value={`${householdInfo?.soHoKhau || ""} - ${householdInfo?.diaChi || ""}`}
+                value={`${householdInfo?.soHoKhau || ""} - ${
+                  householdInfo?.diaChi || ""
+                }`}
                 disabled
                 className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm"
               />
@@ -607,7 +681,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <div className="space-y-2">
                 <select
                   value={formData.householdId}
-                  onChange={(e) => setFormData({ ...formData, householdId: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, householdId: e.target.value })
+                  }
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
                   <option value="">Chọn hộ khẩu (tùy chọn)</option>
@@ -618,7 +694,8 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
                   ))}
                 </select>
                 <p className="text-xs text-gray-500">
-                  Chọn hộ khẩu bạn muốn gia nhập. Nếu không có hộ khẩu phù hợp, để trống và tổ trưởng sẽ xử lý.
+                  Chọn hộ khẩu bạn muốn gia nhập. Nếu không có hộ khẩu phù hợp,
+                  để trống và tổ trưởng sẽ xử lý.
                 </p>
               </div>
             )}
@@ -634,7 +711,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
                 type="text"
                 required
                 value={formData.hoTen}
-                onChange={(e) => setFormData({ ...formData, hoTen: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, hoTen: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Nhập họ và tên"
               />
@@ -647,7 +726,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <input
                 type="text"
                 value={formData.cccd}
-                onChange={(e) => setFormData({ ...formData, cccd: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, cccd: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Nhập số CCCD nếu có"
               />
@@ -663,7 +744,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
                 type="date"
                 required
                 value={formData.ngaySinh}
-                onChange={(e) => setFormData({ ...formData, ngaySinh: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, ngaySinh: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
@@ -675,7 +758,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <select
                 required
                 value={formData.gioiTinh}
-                onChange={(e) => setFormData({ ...formData, gioiTinh: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, gioiTinh: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
                 <option value="">Chọn giới tính</option>
@@ -692,7 +777,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <select
                 required
                 value={formData.quanHe}
-                onChange={(e) => setFormData({ ...formData, quanHe: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, quanHe: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
                 <option value="">Chọn quan hệ</option>
@@ -716,7 +803,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               type="text"
               required
               value={formData.noiSinh}
-              onChange={(e) => setFormData({ ...formData, noiSinh: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, noiSinh: e.target.value })
+              }
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               placeholder="Nhập nơi sinh"
             />
@@ -730,7 +819,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <input
                 type="text"
                 value={formData.nguyenQuan}
-                onChange={(e) => setFormData({ ...formData, nguyenQuan: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, nguyenQuan: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Nhập nguyên quán"
               />
@@ -743,7 +834,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <input
                 type="text"
                 value={formData.danToc}
-                onChange={(e) => setFormData({ ...formData, danToc: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, danToc: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Ví dụ: Kinh, Tày..."
               />
@@ -758,7 +851,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <input
                 type="text"
                 value={formData.tonGiao}
-                onChange={(e) => setFormData({ ...formData, tonGiao: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, tonGiao: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Ví dụ: Không, Phật giáo..."
               />
@@ -771,7 +866,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <input
                 type="text"
                 value={formData.quocTich}
-                onChange={(e) => setFormData({ ...formData, quocTich: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, quocTich: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Ví dụ: Việt Nam"
               />
@@ -786,7 +883,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <input
                 type="text"
                 value={formData.ngheNghiep}
-                onChange={(e) => setFormData({ ...formData, ngheNghiep: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, ngheNghiep: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Nhập nghề nghiệp"
               />
@@ -799,7 +898,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <input
                 type="text"
                 value={formData.noiLamViec}
-                onChange={(e) => setFormData({ ...formData, noiLamViec: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, noiLamViec: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Nhập nơi làm việc"
               />
@@ -814,7 +915,12 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <input
                 type="date"
                 value={formData.ngayDangKyThuongTru}
-                onChange={(e) => setFormData({ ...formData, ngayDangKyThuongTru: e.target.value })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    ngayDangKyThuongTru: e.target.value,
+                  })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
@@ -826,7 +932,12 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
               <input
                 type="text"
                 value={formData.diaChiThuongTruTruoc}
-                onChange={(e) => setFormData({ ...formData, diaChiThuongTruTruoc: e.target.value })}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    diaChiThuongTruTruoc: e.target.value,
+                  })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Nhập địa chỉ trước đây"
               />
@@ -839,7 +950,9 @@ function AddPersonModal({ isOpen, onClose, onSubmit, householdInfo, userInfo, ho
             </label>
             <textarea
               value={formData.ghiChu}
-              onChange={(e) => setFormData({ ...formData, ghiChu: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, ghiChu: e.target.value })
+              }
               rows={3}
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               placeholder="Thông tin bổ sung nếu có..."
@@ -876,7 +989,12 @@ interface AddNewbornModalProps {
   householdInfo: Household | null;
 }
 
-function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbornModalProps) {
+function AddNewbornModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  householdInfo,
+}: AddNewbornModalProps) {
   const [formData, setFormData] = useState({
     householdId: "",
     hoTen: "",
@@ -895,7 +1013,7 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
 
   useEffect(() => {
     if (isOpen && householdInfo) {
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
         householdId: householdInfo.id.toString(),
       }));
@@ -907,7 +1025,12 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
     setError(null);
 
     // Validation
-    if (!formData.hoTen || !formData.ngaySinh || !formData.gioiTinh || !formData.noiSinh) {
+    if (
+      !formData.hoTen ||
+      !formData.ngaySinh ||
+      !formData.gioiTinh ||
+      !formData.noiSinh
+    ) {
       setError("Vui lòng điền đầy đủ các trường bắt buộc");
       return;
     }
@@ -953,7 +1076,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
             </label>
             <input
               type="text"
-              value={`${householdInfo?.soHoKhau || ""} - ${householdInfo?.diaChi || ""}`}
+              value={`${householdInfo?.soHoKhau || ""} - ${
+                householdInfo?.diaChi || ""
+              }`}
               disabled
               className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm"
             />
@@ -969,7 +1094,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
                 type="text"
                 required
                 value={formData.hoTen}
-                onChange={(e) => setFormData({ ...formData, hoTen: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, hoTen: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Nhập họ và tên"
               />
@@ -983,7 +1110,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
                 type="date"
                 required
                 value={formData.ngaySinh}
-                onChange={(e) => setFormData({ ...formData, ngaySinh: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, ngaySinh: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
@@ -997,7 +1126,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
               <select
                 required
                 value={formData.gioiTinh}
-                onChange={(e) => setFormData({ ...formData, gioiTinh: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, gioiTinh: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
                 <option value="">Chọn giới tính</option>
@@ -1015,7 +1146,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
                 type="text"
                 required
                 value={formData.noiSinh}
-                onChange={(e) => setFormData({ ...formData, noiSinh: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, noiSinh: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Nhập nơi sinh"
               />
@@ -1030,7 +1163,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
               <input
                 type="text"
                 value={formData.nguyenQuan}
-                onChange={(e) => setFormData({ ...formData, nguyenQuan: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, nguyenQuan: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Nhập nguyên quán"
               />
@@ -1043,7 +1178,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
               <input
                 type="text"
                 value={formData.danToc}
-                onChange={(e) => setFormData({ ...formData, danToc: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, danToc: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Ví dụ: Kinh, Tày..."
               />
@@ -1058,7 +1195,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
               <input
                 type="text"
                 value={formData.tonGiao}
-                onChange={(e) => setFormData({ ...formData, tonGiao: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, tonGiao: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Ví dụ: Không, Phật giáo..."
               />
@@ -1071,7 +1210,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
               <input
                 type="text"
                 value={formData.quocTich}
-                onChange={(e) => setFormData({ ...formData, quocTich: e.target.value })}
+                onChange={(e) =>
+                  setFormData({ ...formData, quocTich: e.target.value })
+                }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 placeholder="Ví dụ: Việt Nam"
               />
@@ -1085,7 +1226,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
             <input
               type="text"
               value={formData.cccd}
-              onChange={(e) => setFormData({ ...formData, cccd: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, cccd: e.target.value })
+              }
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               placeholder="Nhập số CCCD nếu đã có"
             />
@@ -1097,7 +1240,9 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
             </label>
             <textarea
               value={formData.ghiChu}
-              onChange={(e) => setFormData({ ...formData, ghiChu: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, ghiChu: e.target.value })
+              }
               rows={3}
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               placeholder="Thông tin bổ sung nếu có..."
@@ -1125,4 +1270,3 @@ function AddNewbornModal({ isOpen, onClose, onSubmit, householdInfo }: AddNewbor
     </div>
   );
 }
-

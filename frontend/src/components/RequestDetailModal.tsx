@@ -95,10 +95,16 @@ const buildNhanKhauPayloadFromRequest = (person: any) => {
 
 const requestTypeLabels: Record<string, string> = {
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
+  SPLIT_HOUSEHOLD: "Yêu cầu tách hộ khẩu",
+  ADD_PERSON: "Thêm nhân khẩu",
+  ADD_NEWBORN: "Thêm con sơ sinh",
+  TEMPORARY_RESIDENCE: "Xin tạm trú",
+  TEMPORARY_ABSENCE: "Xin tạm vắng",
   SUA_NHAN_KHAU: "Sửa thông tin nhân khẩu",
   XOA_NHAN_KHAU: "Xoá nhân khẩu",
   TAM_TRU: "Xin tạm trú",
   TAM_VANG: "Xin tạm vắng",
+  DECEASED: "Xác nhận qua đời",
 };
 
 const quanHeLabels: Record<string, string> = {
