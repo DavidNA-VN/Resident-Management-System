@@ -187,6 +187,17 @@ class ApiService {
     });
   }
 
+  /**
+   * GET /citizen/me/households
+   * Lấy hộ khẩu liên quan đến tài khoản người dân hiện tại (dựa trên personId hoặc username=cccd)
+   */
+  async getMyHouseholds() {
+    return this.request<{ success: boolean; data: any[]; error?: { code: string; message: string } }>(
+      "/citizen/me/households",
+      { method: "GET" }
+    );
+  }
+
   logout() {
     localStorage.removeItem("accessToken");
     localStorage.removeItem("userInfo");

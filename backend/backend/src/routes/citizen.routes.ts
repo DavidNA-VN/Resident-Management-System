@@ -142,7 +142,7 @@ router.get("/citizen/household", requireAuth, requireRole(["nguoi_dan"]), async 
          FROM nhan_khau WHERE id = $1`,
         [hoKhau.chuHoId]
       );
-      if (chuHoResult.rowCount > 0) {
+      if ((chuHoResult?.rowCount ?? 0) > 0) {
         chuHo = chuHoResult.rows[0];
       }
     }
@@ -178,6 +178,71 @@ router.get("/citizen/households", async (req, res, next) => {
       success: true,
       data: householdsResult.rows,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /citizen/me/households
+ * Lấy danh sách (thực tế 1 phần tử) hộ khẩu liên quan tới tài khoản người dân hiện tại.
+ * Logic:
+ *  - Nếu users.personId tồn tại: lấy nhan_khau theo personId -> trả về ho_khau của người đó
+ *  - Nếu personId không có: thử khớp username (CCCD) với nhan_khau.cccd (bỏ space) và trả về ho_khau tương ứng
+ */
+router.get("/citizen/me/households", requireAuth, requireRole(["nguoi_dan"]), async (req, res, next) => {
+  try {
+    const userId = req.user!.id;
+
+    // Try users.personId first
+    const userRow = await query(`SELECT "personId", username FROM users WHERE id = $1`, [userId]);
+    if (userRow.rowCount === 0) {
+      return res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "User not found" } });
+    }
+
+    const personId = userRow.rows[0].personId;
+    const username = String(userRow.rows[0].username || "").trim();
+
+    console.log("[GET /citizen/me/households] userId:", userId, "personId:", personId, "username:", username);
+
+    let households: any[] = [];
+
+    if (personId) {
+      // find the nhan_khau and its ho_khau
+      const nhResult = await query(
+        `SELECT hk.id, hk."soHoKhau", hk.diaChi, hk.trangThai
+         FROM nhan_khau nk
+         JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+         WHERE nk.id = $1`,
+        [personId]
+      );
+      if ((nhResult?.rowCount ?? 0) > 0) {
+        households.push(nhResult.rows[0]);
+      }
+    } else if (username) {
+      // Try to match username as CCCD (remove spaces)
+      const norm = username.replace(/\s+/g, "");
+      const matchResult = await query(
+        `SELECT hk.id, hk."soHoKhau", hk.diaChi, hk.trangThai
+         FROM nhan_khau nk
+         JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+         WHERE REPLACE(COALESCE(nk.cccd,''),' ','') = $1
+         LIMIT 1`,
+        [norm]
+      );
+      if ((matchResult?.rowCount ?? 0) > 0) {
+        households.push(matchResult.rows[0]);
+      }
+    }
+
+    if (households.length === 0) {
+      return res.status(200).json({
+        success: false,
+        error: { code: "NOT_LINKED", message: "Tài khoản chưa liên kết nhân khẩu" },
+      });
+    }
+
+    return res.json({ success: true, data: households });
   } catch (err) {
     next(err);
   }
@@ -241,8 +306,10 @@ router.post("/citizen/tam-tru-vang", requireAuth, requireRole(["nguoi_dan"]), up
       [userId]
     );
 
-    const isLinkedToPerson = userLinkCheck.rows[0]?.personId == nhanKhauId;
-    const isHeadOfHousehold = nhanKhau.chuHoId == userId;
+    const currentPersonId = userLinkCheck.rows[0]?.personId ?? null;
+    const isLinkedToPerson = currentPersonId == nhanKhauId;
+    // ho_khau.chuHoId stored as chuHoId was selected into nhanKhau via join; use nhanKhau.chuHoId
+    const isHeadOfHousehold = currentPersonId && (nhanKhau.chuHoId ?? null) && Number(currentPersonId) === Number(nhanKhau.chuHoId);
 
     if (!isLinkedToPerson && !isHeadOfHousehold) {
       return res.status(403).json({

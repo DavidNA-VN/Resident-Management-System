@@ -48,7 +48,7 @@ router.get(
       const hoKhauId = Number(req.params.id);
       const r = await query(`SELECT * FROM ho_khau WHERE id = $1`, [hoKhauId]);
 
-      if (r.rowCount === 0) {
+      if ((r?.rowCount ?? 0) === 0) {
         return res.status(404).json({
           success: false,
           error: { code: "NOT_FOUND", message: "Hộ khẩu không tồn tại" },
@@ -116,7 +116,7 @@ router.post(
 
       return res.status(201).json({ success: true, data: r.rows[0] });
     } catch (err) {
-      if (err?.code === "23505" && err?.constraint === "uq_ho_khau_so") {
+      if ((err as any)?.code === "23505" && (err as any)?.constraint === "uq_ho_khau_so") {
         return res.status(409).json({
           success: false,
           error: {
@@ -168,7 +168,7 @@ router.patch(
           [soHoKhau.trim(), hoKhauId]
         );
 
-        if (existing.rowCount > 0) {
+        if ((existing?.rowCount ?? 0) > 0) {
           return res.status(409).json({
             success: false,
             error: {
@@ -276,7 +276,7 @@ router.patch(
           [soHoKhau.trim()]
         );
 
-        if (existing.rowCount > 0) {
+        if ((existing?.rowCount ?? 0) > 0) {
           return res.status(409).json({
             success: false,
             error: {
@@ -292,7 +292,7 @@ router.patch(
         `SELECT id, "quanHe" FROM nhan_khau WHERE id = $1 AND "hoKhauId" = $2`,
         [chuHoId, hoKhauId]
       );
-      if (check.rowCount === 0) {
+      if ((check?.rowCount ?? 0) === 0) {
         return res.status(400).json({
           success: false,
           error: {
@@ -320,7 +320,7 @@ router.patch(
         [hoKhauId, chuHoId]
       );
 
-      if (existingChuHo.rowCount > 0) {
+      if ((existingChuHo?.rowCount ?? 0) > 0) {
         return res.status(400).json({
           success: false,
           error: {
@@ -391,7 +391,7 @@ router.patch(
         `SELECT id, "quanHe" FROM nhan_khau WHERE id = $1 AND "hoKhauId" = $2`,
         [newChuHoId, hoKhauId]
       );
-      if (newChuHoCheck.rowCount === 0) {
+      if ((newChuHoCheck?.rowCount ?? 0) === 0) {
         return res.status(400).json({
           success: false,
           error: {
@@ -412,13 +412,13 @@ router.patch(
 
       // Nếu không có chủ hộ hiện tại, kiểm tra xem có nhân khẩu nào có quanHe = chu_ho không
       let oldChuHoId: number | null = null;
-      if (currentChuHo.rowCount === 0) {
+      if ((currentChuHo?.rowCount ?? 0) === 0) {
         const chuHoByQuanHe = await query(
           `SELECT id FROM nhan_khau 
            WHERE "hoKhauId" = $1 AND "quanHe" = 'chu_ho' AND id != $2`,
           [hoKhauId, newChuHoId]
         );
-        if (chuHoByQuanHe.rowCount > 0) {
+        if ((chuHoByQuanHe?.rowCount ?? 0) > 0) {
           oldChuHoId = chuHoByQuanHe.rows[0].id;
         }
       } else {

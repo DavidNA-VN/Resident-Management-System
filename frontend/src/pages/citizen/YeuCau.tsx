@@ -96,9 +96,14 @@ export default function YeuCau() {
 
   const loadHouseholds = async () => {
     try {
-      const response = await apiService.getCitizenHouseholds();
+      // Prefer backend endpoint that returns households related to this user
+      const response = await apiService.getMyHouseholds();
       if (response.success) {
         setHouseholds(response.data || []);
+      } else {
+        // If backend indicates not linked, fall back to empty list and keep UI informative
+        console.warn("getMyHouseholds:", response.error?.message || "no data");
+        setHouseholds([]);
       }
     } catch (err) {
       console.error("Lỗi khi tải danh sách hộ khẩu:", err);

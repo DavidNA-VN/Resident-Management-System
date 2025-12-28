@@ -139,7 +139,7 @@ export default function RequestModal({
           <div className="mb-4 text-sm text-gray-600">
             <span className="font-medium">Hộ khẩu:</span> {householdInfo.soHoKhau} — {householdInfo.diaChi}
           </div>
-        )
+        )}
 
         {/* Error Message */}
         {error && (

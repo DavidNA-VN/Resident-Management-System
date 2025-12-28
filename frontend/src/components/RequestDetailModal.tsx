@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { apiService } from "../services/api";
+import { getCurrentUser } from "../utils/auth";
 import { formatFromYMD } from "../utils/date";
 
 interface RequestDetailModalProps {
@@ -52,6 +53,7 @@ export default function RequestDetailModal({
   onClose,
   onRefresh,
 }: RequestDetailModalProps) {
+  console.log("[RequestDetailModal init props]", { requestId, isOpen });
   const [requestDetail, setRequestDetail] = useState<RequestDetail | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -69,6 +71,7 @@ export default function RequestDetailModal({
     setIsLoading(true);
     setError(null);
     try {
+      console.log("[UI] RequestDetailModal mount loadRequestDetail", requestId);
       // For tam-tru-vang requests, use the specific API
       const isTamTruVang = requestDetail?.type === 'TEMPORARY_RESIDENCE' ||
                           requestDetail?.type === 'TEMPORARY_ABSENCE' ||
@@ -80,10 +83,17 @@ export default function RequestDetailModal({
         : await apiService.getRequestDetail(requestId);
 
       if (response.success) {
+        console.log("[UI] loadRequestDetail response.status:", response.data?.status);
         setRequestDetail(response.data);
+        // compute role/canReview debug
+        const cu = getCurrentUser();
+        const role = cu?.role || null;
+        const canReview = role ? ["can_bo", "to_truong", "to_pho"].includes(role) : false;
+        console.log("[RequestDetailModal]", { role, canReview, status: response.data?.status, requestId: response.data?.id });
       }
     } catch (err: any) {
-      setError(err.error?.message || "Không thể tải chi tiết yêu cầu");
+      const msg = err?.error?.message || err?.message || err;
+      setError(typeof msg === "object" ? JSON.stringify(msg) : String(msg || "Không thể tải chi tiết yêu cầu"));
     } finally {
       setIsLoading(false);
     }
@@ -103,25 +113,39 @@ export default function RequestDetailModal({
                           requestDetail?.type === 'TAM_TRU' ||
                           requestDetail?.type === 'TAM_VANG';
 
+      const cu = getCurrentUser();
+      const role = cu?.role || null;
+      const canReview = role ? ["can_bo", "to_truong", "to_pho"].includes(role) : false;
+      console.log("[RequestDetailModal] approve attempt", { requestId, role, canReview });
+      if (!canReview) {
+        throw { code: "FORBIDDEN", message: "Bạn không có quyền duyệt yêu cầu này" };
+      }
+
+      console.log("[UI] approving request:", requestId);
       const response = isTamTruVang
         ? await apiService.approveTamTruVangRequest(requestId)
         : await apiService.approveRequest(requestId);
+      console.log("[UI] approve response:", response);
 
       if (response.success) {
-        alert("Duyệt yêu cầu thành công!");
+        const applied = response.data?.applied;
+        const appliedInfo = applied && applied.id ? ` (applied id: ${applied.id})` : "";
+        alert("Duyệt yêu cầu thành công!" + appliedInfo);
         onRefresh();
         onClose();
       }
     } catch (err: any) {
-      setError(err.error?.message || "Không thể duyệt yêu cầu");
+      console.error("[UI] approve error:", err);
+      const msg = err?.error?.message || err?.message || "Không thể duyệt yêu cầu";
+      setError(msg);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleReject = async () => {
-    if (!rejectReason.trim()) {
-      setError("Vui lòng nhập lý do từ chối");
+    if (!rejectReason.trim() || rejectReason.trim().length < 5) {
+      setError("Vui lòng nhập lý do từ chối (ít nhất 5 ký tự)");
       return;
     }
 
@@ -133,10 +157,19 @@ export default function RequestDetailModal({
                           requestDetail?.type === 'TEMPORARY_ABSENCE' ||
                           requestDetail?.type === 'TAM_TRU' ||
                           requestDetail?.type === 'TAM_VANG';
+      const cu = getCurrentUser();
+      const role = cu?.role || null;
+      const canReview = role ? ["can_bo", "to_truong", "to_pho"].includes(role) : false;
+      console.log("[RequestDetailModal] reject attempt", { requestId, role, canReview });
+      if (!canReview) {
+        throw { code: "FORBIDDEN", message: "Bạn không có quyền duyệt yêu cầu này" };
+      }
 
+      console.log("[UI] rejecting request:", requestId, "reason:", rejectReason);
       const response = isTamTruVang
         ? await apiService.rejectTamTruVangRequest(requestId, rejectReason)
         : await apiService.rejectRequest(requestId, rejectReason);
+      console.log("[UI] reject response:", response);
 
       if (response.success) {
         alert("Từ chối yêu cầu thành công!");
@@ -146,13 +179,22 @@ export default function RequestDetailModal({
         onClose();
       }
     } catch (err: any) {
-      setError(err.error?.message || "Không thể từ chối yêu cầu");
+      console.error("[UI] reject error:", err);
+      const msg = err?.error?.message || err?.message || "Không thể từ chối yêu cầu";
+      setError(msg);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   if (!isOpen) return null;
+
+  // render-time debug for status/role
+  const cuRender = getCurrentUser();
+  const roleRender = cuRender?.role || null;
+  const statusValueRender = String(requestDetail?.status || "").trim().toUpperCase();
+  const canReviewRender = roleRender ? ["can_bo", "to_truong", "to_pho"].includes(roleRender) : false;
+  console.log("[RequestDetailModal render]", { requestId, statusValueRender, roleRender, canReviewRender, requestDetail });
 
   return (
     <>
@@ -181,7 +223,21 @@ export default function RequestDetailModal({
           <div className="p-6 space-y-6">
             {error && (
               <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
-                {error}
+                <div className="mb-2">{error}</div>
+                {/* Quick action: allow leader to reject with this reason */}
+                {requestDetail?.status === "pending" && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setRejectReason(String(error));
+                        setShowRejectModal(true);
+                      }}
+                      className="rounded-md bg-red-600 text-white px-3 py-1 text-sm font-medium hover:bg-red-700"
+                    >
+                      Từ chối với lý do này
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -230,11 +286,31 @@ export default function RequestDetailModal({
                     {requestDetail.hoKhauLienQuan && (
                       <div>
                         <p className="text-sm text-gray-500 mb-1">Hộ khẩu liên quan</p>
-                        <p className="text-base font-semibold text-gray-900">
-                          {requestDetail.hoKhauLienQuan.soHoKhau || requestDetail.hoKhauLienQuan.diaChi || "-"}
-                        </p>
+                    <p className="text-base font-semibold text-gray-900">
+                      {requestDetail.hoKhauLienQuan.soHoKhau || requestDetail.hoKhauLienQuan.diaChi || "-"}
+                    </p>
+                    {requestDetail.targetHouseholdId && (
+                      <div className="mt-2">
+                        <button
+                          onClick={() => {
+                            window.location.href = `/ho-khau/${requestDetail.targetHouseholdId}`;
+                          }}
+                          className="rounded-md border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          Mở hộ khẩu
+                        </button>
                       </div>
                     )}
+                      </div>
+                    )}
+                {/* Requester info */}
+                <div className="mt-4">
+                  <p className="text-sm text-gray-500 mb-1">Người tạo đơn</p>
+                  <p className="text-base font-semibold text-gray-900">
+                    {requestDetail.requesterName || requestDetail.requester?.hoTen || requestDetail.requesterUsername || "-"}
+                    {requestDetail.requesterCccd && <span className="text-gray-500 ml-2">({requestDetail.requesterCccd})</span>}
+                  </p>
+                </div>
                   </div>
                 </div>
 
@@ -333,12 +409,7 @@ export default function RequestDetailModal({
                             <p>CCCD: {requestDetail.payload.cccd}</p>
                           )}
                           {requestDetail.payload.ngaySinh && (
-                            <p>
-                              Ngày sinh:{" "}
-                              {formatFromYMD(requestDetail.payload.ngaySinh)}
-                                "vi-VN"
-                              )}
-                            </p>
+                            <p>Ngày sinh: {formatFromYMD(requestDetail.payload.ngaySinh)}</p>
                           )}
                           {requestDetail.payload.gioiTinh && (
                             <p>
@@ -493,7 +564,7 @@ export default function RequestDetailModal({
                 )}
 
                 {/* Actions */}
-                {requestDetail.status === "pending" && (
+                {String(requestDetail.status || "").toUpperCase() === "PENDING" && (
                   <div className="flex gap-3 pt-4 border-t border-gray-200">
                     <button
                       onClick={handleApprove}

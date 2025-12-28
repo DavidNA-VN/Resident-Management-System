@@ -204,7 +204,7 @@ router.post(
           [hoKhauId]
         );
         
-        if (hoKhauCheck.rowCount === 0) {
+        if ((hoKhauCheck?.rowCount ?? 0) === 0) {
           return res.status(400).json({
             success: false,
             error: {
@@ -222,7 +222,7 @@ router.post(
         );
 
         const hoKhau = hoKhauCheck.rows[0];
-        if (existingChuHo.rowCount > 0 || hoKhau.chuHoId) {
+        if (((existingChuHo?.rowCount ?? 0) > 0) || hoKhau.chuHoId) {
           return res.status(400).json({
             success: false,
             error: {
@@ -530,7 +530,7 @@ router.patch(
           [id]
         );
 
-        if (currentNhanKhau.rowCount === 0) {
+        if ((currentNhanKhau?.rowCount ?? 0) === 0) {
           return res.status(404).json({
             success: false,
             error: { code: "NOT_FOUND", message: "Nhân khẩu không tồn tại" },
@@ -553,8 +553,8 @@ router.patch(
         );
 
         if (
-          existingChuHo.rowCount > 0 ||
-          (hoKhauCheck.rowCount > 0 &&
+          ((existingChuHo?.rowCount ?? 0) > 0) ||
+          ((hoKhauCheck?.rowCount ?? 0) > 0 &&
             hoKhauCheck.rows[0].chuHoId &&
             hoKhauCheck.rows[0].chuHoId !== id)
         ) {
@@ -580,7 +580,7 @@ router.patch(
         [...values, id]
       );
 
-      if (r.rowCount === 0) {
+      if ((r?.rowCount ?? 0) === 0) {
         return res.status(404).json({
           success: false,
           error: { code: "NOT_FOUND", message: "Nhân khẩu không tồn tại" },

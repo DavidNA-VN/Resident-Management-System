@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { query } from "../db";
+import { query, pool } from "../db";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware";
 import { getCurrentDateString, normalizeDateOnly } from "../utils/date";
 
@@ -46,7 +46,7 @@ router.post("/requests", requireAuth, requireRole(["nguoi_dan"]), async (req, re
     }
 
     // Validate type (allow both canonical enums and legacy TAM_TRU/TAM_VANG)
-    const allTypes = Object.values(RequestType).concat(["TAM_TRU", "TAM_VANG"]);
+    const allTypes: string[] = (Object.values(RequestType) as string[]).concat(["TAM_TRU", "TAM_VANG"]);
 
     if (!type || !allTypes.includes(type)) {
       return res.status(400).json({
@@ -86,24 +86,26 @@ router.post("/requests", requireAuth, requireRole(["nguoi_dan"]), async (req, re
 
     // Validate targetHouseholdId nếu có (chỉ áp dụng cho user đã linked)
     if (targetHouseholdId) {
-      // Kiểm tra xem user đã linked chưa
+      // Kiểm tra xem user đã linked chưa (personId)
       const userLinkCheck = await query(
         `SELECT "personId" FROM users WHERE id = $1`,
         [userId]
       );
 
-      const isUserLinked = userLinkCheck.rows[0]?.personId !== null;
+      const personId = userLinkCheck.rows[0]?.personId ?? null;
+      const isUserLinked = !!personId;
 
       if (isUserLinked) {
         // User đã linked thì phải validate household thuộc về họ
+        // Trước đây code so sánh nhan_khau."userId" = userId (sai) — phải so sánh nhan_khau.id = personId
         const householdCheck = await query(
           `SELECT hk.id FROM ho_khau hk
            INNER JOIN nhan_khau nk ON hk.id = nk."hoKhauId"
-           WHERE hk.id = $1 AND nk."userId" = $2 LIMIT 1`,
-          [targetHouseholdId, userId]
+           WHERE hk.id = $1 AND nk.id = $2 LIMIT 1`,
+          [targetHouseholdId, personId]
         );
 
-        if (householdCheck.rowCount === 0) {
+        if ((householdCheck?.rowCount ?? 0) === 0) {
           return res.status(403).json({
             success: false,
             error: {
@@ -230,7 +232,7 @@ router.get("/tam-tru-vang/requests", requireAuth, requireRole(["to_truong", "to_
         nk."hoTen" ILIKE $${idx} OR
         nk.cccd ILIKE $${idx} OR
         hk."soHoKhau" ILIKE $${idx} OR
-        hk.diaChi ILIKE $${idx}
+        hk."diaChi" ILIKE $${idx}
       )`;
       params.push(kw);
       idx++;
@@ -262,7 +264,7 @@ router.get("/tam-tru-vang/requests", requireAuth, requireRole(["to_truong", "to_
         NULLIF(r.payload->>'nhanKhauId','')::int as "nhanKhauId",
         u."fullName" as "requesterName",
         nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
-        hk.id as "householdId", hk."soHoKhau" as "householdCode", hk.diaChi as "householdAddress"
+        hk.id as "householdId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress"
       FROM requests r
       LEFT JOIN users u ON r."requesterUserId" = u.id
       LEFT JOIN nhan_khau nk ON r."targetPersonId" = nk.id
@@ -275,6 +277,8 @@ router.get("/tam-tru-vang/requests", requireAuth, requireRole(["to_truong", "to_
     params.push(offset);
 
     const result = await query(selectQuery, params);
+
+    console.log("[GET /requests] role:", req.user?.role, "userId:", req.user?.id, "returned:", result?.rows?.length ?? 0);
 
     const items = result.rows.map((row: any) => {
       let attachments = [];
@@ -333,7 +337,7 @@ router.post("/tam-tru-vang/requests/:id/approve", requireAuth, requireRole(["to_
     }
 
     const requestResult = await query(`SELECT * FROM requests WHERE id = $1`, [requestId]);
-    if (requestResult.rowCount === 0) {
+    if ((requestResult?.rowCount ?? 0) === 0) {
       return res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Yêu cầu không tồn tại" }});
     }
     const reqRow = requestResult.rows[0];
@@ -365,7 +369,7 @@ router.post("/tam-tru-vang/requests/:id/approve", requireAuth, requireRole(["to_
         [nhanKhauId, tuNgay]
       );
 
-      if (existingTamTruVang.rowCount > 0) {
+      if ((existingTamTruVang?.rowCount ?? 0) > 0) {
         // Update existing record
         await query(
           `UPDATE tam_tru_vang SET "trangThai" = 'da_duyet', "nguoiDuyet" = $1 WHERE id = $2`,
@@ -422,7 +426,7 @@ router.get("/tam-tru-vang/requests/:id", requireAuth, requireRole(["to_truong", 
         r.payload,
         u."fullName" as "requesterName",
         nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
-        hk.id as "householdId", hk."soHoKhau" as "householdCode", hk.diaChi as "householdAddress"
+        hk.id as "householdId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress"
       FROM requests r
       LEFT JOIN users u ON r."requesterUserId" = u.id
       LEFT JOIN nhan_khau nk ON r."targetPersonId" = nk.id
@@ -431,7 +435,7 @@ router.get("/tam-tru-vang/requests/:id", requireAuth, requireRole(["to_truong", 
       [requestId]
     );
 
-    if (result.rowCount === 0) {
+    if ((result?.rowCount ?? 0) === 0) {
       return res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Yêu cầu không tồn tại" }});
     }
 
@@ -487,7 +491,7 @@ router.post("/tam-tru-vang/requests/:id/reject", requireAuth, requireRole(["to_t
     }
 
     const requestResult = await query(`SELECT * FROM requests WHERE id = $1`, [requestId]);
-    if (requestResult.rowCount === 0) {
+    if ((requestResult?.rowCount ?? 0) === 0) {
       return res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Yêu cầu không tồn tại" }});
     }
     const reqRow = requestResult.rows[0];
@@ -699,7 +703,7 @@ router.get("/requests/:id", requireAuth, requireRole(["to_truong", "to_pho", "ca
       [requestId, userId]
     );
 
-    if (!isLeader && isRequester.rowCount === 0) {
+    if (!isLeader && (isRequester?.rowCount ?? 0) === 0) {
       return res.status(403).json({
         success: false,
         error: { code: "FORBIDDEN", message: "Không có quyền xem yêu cầu này" },
@@ -707,7 +711,7 @@ router.get("/requests/:id", requireAuth, requireRole(["to_truong", "to_pho", "ca
     }
 
     const result = await query(
-      `SELECT r.*, u."fullName" as requesterName, ru."fullName" as reviewerName
+      `SELECT r.*, u."fullName" as requesterName, u.username as requesterUsername, u.cccd as requesterCccd, ru."fullName" as reviewerName
        FROM requests r
        LEFT JOIN users u ON r."requesterUserId" = u.id
        LEFT JOIN users ru ON r."reviewedBy" = ru.id
@@ -715,7 +719,7 @@ router.get("/requests/:id", requireAuth, requireRole(["to_truong", "to_pho", "ca
       [requestId]
     );
 
-    if (result.rowCount === 0) {
+    if ((result?.rowCount ?? 0) === 0) {
       return res.status(404).json({
         success: false,
         error: { code: "NOT_FOUND", message: "Yêu cầu không tồn tại" },
@@ -723,23 +727,26 @@ router.get("/requests/:id", requireAuth, requireRole(["to_truong", "to_pho", "ca
     }
 
     const row = result.rows[0];
-    return res.json({
-      success: true,
-      data: {
-        id: row.id,
-        code: row.code,
-        type: row.type,
-        status: row.status,
-        rejectionReason: row.rejectionReason,
-        createdAt: row.createdAt,
-        reviewedAt: row.reviewedAt,
-        targetHouseholdId: row.targetHouseholdId,
-        targetPersonId: row.targetPersonId,
-        payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
-        requesterName: row.requesterName,
-        reviewerName: row.reviewerName,
-      },
-    });
+    const data = {
+      id: row.id,
+      code: row.code,
+      type: row.type,
+      status: row.status ?? "PENDING",
+      rejectionReason: row.rejectionReason,
+      createdAt: row.createdAt,
+      reviewedAt: row.reviewedAt,
+      targetHouseholdId: row.targetHouseholdId,
+      targetPersonId: row.targetPersonId,
+      payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+      requesterName: row.requesterName,
+      requesterUsername: row.requesterUsername,
+      requesterCccd: row.requesterCccd,
+      reviewerName: row.reviewerName,
+    };
+
+    console.log("[GET /requests/:id] keys=", Object.keys(data));
+
+    return res.json({ success: true, data });
   } catch (err) {
     next(err);
   }
@@ -755,8 +762,8 @@ router.get("/requests", requireAuth, requireRole(["to_truong", "to_pho", "can_bo
     // Build query selecting requester and related household/person info
     let queryStr = `
       SELECT r.id, r.code, r.type, r.status, r."createdAt", r.priority,
-             u.id as "requesterId", u."fullName" as "requesterName", u.username as "requesterUsername",
-             hk.id as "hoKhauId", hk."soHoKhau" as "householdCode", hk.diaChi as "householdAddress",
+             u.id as "requesterId", u."fullName" as "requesterName", u.username as "requesterUsername", u.cccd as "requesterCccd",
+            hk.id as "hoKhauId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress",
              nk.id as "nhanKhauId", nk."hoTen" as "nhanKhauName",
              r.payload
       FROM requests r
@@ -769,8 +776,14 @@ router.get("/requests", requireAuth, requireRole(["to_truong", "to_pho", "can_bo
     let paramIndex = 1;
 
     if (status) {
-      queryStr += ` AND r.status = $${paramIndex}`;
-      params.push(status);
+      // Compare status case-insensitively to tolerate 'pending'/'PENDING'
+      queryStr += ` AND UPPER(r.status) = UPPER($${paramIndex})`;
+      params.push(String(status));
+      paramIndex++;
+    } else {
+      // default to PENDING if not provided
+      queryStr += ` AND UPPER(r.status) = UPPER($${paramIndex})`;
+      params.push("PENDING");
       paramIndex++;
     }
 
@@ -797,13 +810,14 @@ router.get("/requests", requireAuth, requireRole(["to_truong", "to_pho", "can_bo
         id: row.id,
         code: row.code,
         type: row.type,
-        status: row.status,
+        status: row.status ?? "PENDING",
         createdAt: row.createdAt,
         priority: row.priority,
         requester: {
           id: row.requesterId,
           fullName: row.requesterName,
           username: row.requesterUsername,
+          cccd: row.requesterCccd,
         },
         hoKhauLienQuan: row.hoKhauId ? {
           id: row.hoKhauId,
@@ -817,6 +831,8 @@ router.get("/requests", requireAuth, requireRole(["to_truong", "to_pho", "can_bo
         payload: parsedPayload,
       };
     });
+
+    console.log("[GET /requests] keys sample=", Object.keys(rows[0] || {}));
 
     return res.json({
       success: true,
@@ -850,7 +866,7 @@ router.post("/requests/:id/approve", requireAuth, requireRole(["to_truong", "to_
       [requestId]
     );
 
-    if (requestResult.rowCount === 0) {
+    if ((requestResult?.rowCount ?? 0) === 0) {
       return res.status(404).json({
         success: false,
         error: { code: "NOT_FOUND", message: "Yêu cầu không tồn tại" },
@@ -878,7 +894,12 @@ router.post("/requests/:id/approve", requireAuth, requireRole(["to_truong", "to_
 
     // Sử dụng householdId từ body nếu được cung cấp (cho ADD_PERSON), nếu không dùng từ request
     const finalHouseholdId = householdId || request.targetHouseholdId;
-    await approvalHandler(requestId, payload, reviewerId, finalHouseholdId, request.targetPersonId);
+    const handlerResult = await approvalHandler(requestId, payload, reviewerId, finalHouseholdId, request.targetPersonId);
+
+    // If handler created a person, set targetPersonId
+    if (handlerResult && handlerResult.id) {
+      await query(`UPDATE requests SET "targetPersonId" = $1 WHERE id = $2`, [handlerResult.id, requestId]);
+    }
 
     // Update request status
     await query(
@@ -888,18 +909,69 @@ router.post("/requests/:id/approve", requireAuth, requireRole(["to_truong", "to_
       [reviewerId, requestId]
     );
 
+    // Fetch updated request to return
+    const updatedReqRes = await query(
+      `SELECT r.*, u."fullName" as requesterName, u.username as requesterUsername, u.cccd as requesterCccd, ru."fullName" as reviewerName
+       FROM requests r
+       LEFT JOIN users u ON r."requesterUserId" = u.id
+       LEFT JOIN users ru ON r."reviewedBy" = ru.id
+       WHERE r.id = $1`,
+      [requestId]
+    );
+    const updatedRow = updatedReqRes.rows[0];
+
     return res.json({
       success: true,
       message: "Yêu cầu đã được duyệt thành công",
+      data: {
+        applied: handlerResult || null,
+        request: updatedRow ? {
+          id: updatedRow.id,
+          code: updatedRow.code,
+          type: updatedRow.type,
+          status: updatedRow.status,
+          createdAt: updatedRow.createdAt,
+          reviewedAt: updatedRow.reviewedAt,
+          targetHouseholdId: updatedRow.targetHouseholdId,
+          targetPersonId: updatedRow.targetPersonId,
+          requesterName: updatedRow.requesterName,
+          requesterUsername: updatedRow.requesterUsername,
+          requesterCccd: updatedRow.requesterCccd,
+        } : null
+      },
     });
   } catch (err: any) {
-    // If it's our custom error, return it directly
-    if (err.code && err.message) {
+    // If it's our custom error (thrown by handlers with shape {code,message})
+    if (err && err.code && err.message) {
       return res.status(400).json({
         success: false,
-        error: { code: err.code, message: err.message },
+        error: { code: String(err.code), message: String(err.message) },
       });
     }
+
+    // Handle common Postgres error codes with friendly messages
+    const pgCode = err?.code;
+    const pgDetail = err?.detail || err?.message || "";
+    if (pgCode === "23505") {
+      return res.status(409).json({
+        success: false,
+        error: { code: "DUPLICATE", message: "Dữ liệu trùng lặp (unique constraint). " + pgDetail },
+      });
+    }
+    if (pgCode === "23503") {
+      return res.status(400).json({
+        success: false,
+        error: { code: "FK_VIOLATION", message: "Ràng buộc khoá ngoại thất bại. " + pgDetail },
+      });
+    }
+    if (pgCode === "23514") {
+      return res.status(400).json({
+        success: false,
+        error: { code: "CHECK_VIOLATION", message: "Ràng buộc dữ liệu không thỏa (check constraint). " + pgDetail },
+      });
+    }
+
+    // fallback: pass to global error handler
     next(err);
   }
 });
@@ -934,7 +1006,7 @@ router.post("/requests/:id/reject", requireAuth, requireRole(["to_truong", "to_p
       [requestId]
     );
 
-    if (requestCheck.rowCount === 0) {
+    if ((requestCheck?.rowCount ?? 0) === 0) {
       return res.status(404).json({
         success: false,
         error: { code: "NOT_FOUND", message: "Yêu cầu không tồn tại" },
@@ -986,7 +1058,7 @@ type ApprovalHandler = (
   reviewerId: number,
   targetHouseholdId?: number,
   targetPersonId?: number
-) => Promise<void>;
+) => Promise<any>;
 
 /**
  * Process ADD_NEWBORN approval
@@ -999,6 +1071,10 @@ async function processAddNewbornApproval(
 ) {
   // Start transaction
   await query("BEGIN");
+  // Lock request row to prevent concurrent approvals
+  await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+  // Lock request row to prevent concurrent approvals
+  await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
 
   try {
     const newborn = payload.newborn || payload;
@@ -1011,7 +1087,7 @@ async function processAddNewbornApproval(
       [householdId]
     );
 
-    if (householdCheck.rowCount === 0) {
+    if ((householdCheck?.rowCount ?? 0) === 0) {
       throw { code: "HOUSEHOLD_NOT_FOUND", message: "Hộ khẩu không tồn tại" };
     }
 
@@ -1027,7 +1103,7 @@ async function processAddNewbornApproval(
         [cccd.trim()]
       );
 
-      if (cccdCheck.rowCount > 0) {
+      if ((cccdCheck?.rowCount ?? 0) > 0) {
         throw { code: "DUPLICATE_CCCD", message: "Số CCCD đã tồn tại trong hệ thống" };
       }
     }
@@ -1039,7 +1115,7 @@ async function processAddNewbornApproval(
       [householdId, hoTen.trim(), ngaySinh]
     );
 
-    if (duplicateCheck.rowCount > 0) {
+    if ((duplicateCheck?.rowCount ?? 0) > 0) {
       throw { code: "DUPLICATE_NEWBORN", message: "Trẻ sơ sinh với thông tin tương tự đã tồn tại trong hộ khẩu" };
     }
 
@@ -1076,8 +1152,9 @@ async function processAddNewbornApproval(
       ]
     );
 
+    const created = insertResult.rows[0];
     await query("COMMIT");
-
+    return created;
   } catch (err) {
     await query("ROLLBACK");
     throw err;
@@ -1118,7 +1195,7 @@ async function processAddPersonApproval(
       [householdId]
     );
 
-    if (householdCheck.rowCount === 0) {
+    if ((householdCheck?.rowCount ?? 0) === 0) {
       throw { code: "HOUSEHOLD_NOT_FOUND", message: "Hộ khẩu không tồn tại" };
     }
 
@@ -1134,7 +1211,7 @@ async function processAddPersonApproval(
         [cccd.trim()]
       );
 
-      if (cccdCheck.rowCount > 0) {
+      if ((cccdCheck?.rowCount ?? 0) > 0) {
         throw { code: "DUPLICATE_CCCD", message: "Số CCCD đã tồn tại trong hệ thống" };
       }
     }
@@ -1146,7 +1223,7 @@ async function processAddPersonApproval(
       [householdId, hoTen.trim(), ngaySinh]
     );
 
-    if (duplicateCheck.rowCount > 0) {
+    if ((duplicateCheck?.rowCount ?? 0) > 0) {
       throw { code: "DUPLICATE_PERSON", message: "Người này đã tồn tại trong hộ khẩu" };
     }
 
@@ -1167,7 +1244,7 @@ async function processAddPersonApproval(
         [householdId]
       );
 
-      if (existingChuHo.rowCount > 0) {
+      if ((existingChuHo?.rowCount ?? 0) > 0) {
         throw { code: "DUPLICATE_CHU_HO", message: "Hộ khẩu đã có chủ hộ. Vui lòng sử dụng chức năng đổi chủ hộ." };
       }
     }
@@ -1205,12 +1282,13 @@ async function processAddPersonApproval(
         processedGhiChu,
       ]
     );
+    const created = insertResult.rows[0];
 
     // 8. If this person becomes chu_ho, update ho_khau
     if (quanHe === 'chu_ho') {
       await query(
         `UPDATE ho_khau SET "chuHoId" = $1 WHERE id = $2`,
-        [insertResult.rows[0].id, householdId]
+        [created.id, householdId]
       );
     }
 
@@ -1222,12 +1300,12 @@ async function processAddPersonApproval(
          WHERE role = 'nguoi_dan'
            AND "personId" IS NULL
            AND normalize_cccd(username) = normalize_cccd($2)`,
-        [insertResult.rows[0].id, cccd.trim()]
+        [created.id, cccd.trim()]
       );
     }
 
     await query("COMMIT");
-
+    return created;
   } catch (err) {
     await query("ROLLBACK");
     throw err;
@@ -1255,7 +1333,7 @@ async function processTemporaryResidenceApproval(
       [nhanKhauId]
     );
 
-    if (nhanKhauCheck.rowCount === 0) {
+    if ((nhanKhauCheck?.rowCount ?? 0) === 0) {
       throw { code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
     }
 
@@ -1274,7 +1352,7 @@ async function processTemporaryResidenceApproval(
       [nhanKhauId]
     );
 
-    if (existingCheck.rowCount > 0) {
+    if ((existingCheck?.rowCount ?? 0) > 0) {
       throw { code: "ACTIVE_TEMP_RECORD_EXISTS", message: "Đã tồn tại bản ghi tạm trú/vắng đang hoạt động cho nhân khẩu này" };
     }
 
@@ -1333,7 +1411,7 @@ async function processTemporaryAbsenceApproval(
       [nhanKhauId]
     );
 
-    if (nhanKhauCheck.rowCount === 0) {
+    if ((nhanKhauCheck?.rowCount ?? 0) === 0) {
       throw { code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
     }
 
@@ -1352,7 +1430,7 @@ async function processTemporaryAbsenceApproval(
       [nhanKhauId]
     );
 
-    if (existingCheck.rowCount > 0) {
+    if ((existingCheck?.rowCount ?? 0) > 0) {
       throw { code: "ACTIVE_TEMP_RECORD_EXISTS", message: "Đã tồn tại bản ghi tạm trú/vắng đang hoạt động cho nhân khẩu này" };
     }
 
