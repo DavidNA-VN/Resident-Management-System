@@ -73,7 +73,6 @@ router.post(
   async (req, res, next) => {
     try {
       const {
-        soHoKhau,
         diaChi,
         tinhThanh,
         quanHuyen,
@@ -85,12 +84,12 @@ router.post(
         ghiChu,
       } = req.body;
 
-      if (!soHoKhau || !diaChi) {
+      if (!diaChi) {
         return res.status(400).json({
           success: false,
           error: {
             code: "VALIDATION_ERROR",
-            message: "Missing soHoKhau or diaChi",
+            message: "Missing diaChi",
           },
         });
       }
@@ -100,10 +99,9 @@ router.post(
          ("soHoKhau","diaChi","tinhThanh","quanHuyen","phuongXa","duongPho",
           "soNha","diaChiDayDu","chuHoId","ngayCap","trangThai","ghiChu")
          VALUES
-         ($1,$2,$3,$4,$5,$6,$7,$8,NULL,$9,'inactive',$10)
+         (generate_ho_khau_code(),$1,$2,$3,$4,$5,$6,$7,NULL,$8,'inactive',$9)
          RETURNING *`,
         [
-          soHoKhau,
           diaChi,
           tinhThanh ?? null,
           quanHuyen ?? null,
@@ -118,6 +116,15 @@ router.post(
 
       return res.status(201).json({ success: true, data: r.rows[0] });
     } catch (err) {
+      if (err?.code === "23505" && err?.constraint === "uq_ho_khau_so") {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: "DUPLICATE_SO_HO_KHAU",
+            message: "Số hộ khẩu đã tồn tại. Vui lòng thử lại.",
+          },
+        });
+      }
       next(err);
     }
   }
@@ -154,8 +161,25 @@ router.patch(
         ghiChu,
       } = req.body;
 
-      const fields: { column: string; value: any }[] = [];
+      // Validation: Kiểm tra duplicate soHoKhau nếu có thay đổi
+      if (soHoKhau !== undefined && soHoKhau.trim() !== "") {
+        const existing = await query(
+          `SELECT id FROM ho_khau WHERE "soHoKhau" = $1 AND id != $2`,
+          [soHoKhau.trim(), hoKhauId]
+        );
 
+        if (existing.rowCount > 0) {
+          return res.status(409).json({
+            success: false,
+            error: {
+              code: "DUPLICATE_SO_HO_KHAU",
+              message: "Số hộ khẩu đã tồn tại trong hệ thống. Vui lòng chọn số khác.",
+            },
+          });
+        }
+      }
+
+      const fields: { column: string; value: any }[] = [];
       if (soHoKhau !== undefined)
         fields.push({ column: "soHoKhau", value: soHoKhau });
       if (diaChi !== undefined)
@@ -208,6 +232,15 @@ router.patch(
 
       return res.json({ success: true, data: r.rows[0] });
     } catch (err) {
+      if ((err as any)?.code === "23505" && (err as any)?.constraint === "uq_ho_khau_so") {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: "DUPLICATE_SO_HO_KHAU",
+            message: "Số hộ khẩu đã tồn tại. Vui lòng thử giá trị khác.",
+          },
+        });
+      }
       next(err);
     }
   }
@@ -224,7 +257,7 @@ router.patch(
   async (req, res, next) => {
     try {
       const hoKhauId = Number(req.params.id);
-      const { chuHoId } = req.body as { chuHoId?: number };
+      const { chuHoId, soHoKhau } = req.body as { chuHoId?: number; soHoKhau?: string };
 
       if (!hoKhauId || !chuHoId) {
         return res.status(400).json({
@@ -234,6 +267,24 @@ router.patch(
             message: "Missing hoKhauId or chuHoId",
           },
         });
+      }
+
+      // Validation: Kiểm tra duplicate soHoKhau nếu có
+      if (soHoKhau !== undefined && soHoKhau.trim() !== "") {
+        const existing = await query(
+          `SELECT id FROM ho_khau WHERE "soHoKhau" = $1`,
+          [soHoKhau.trim()]
+        );
+
+        if (existing.rowCount > 0) {
+          return res.status(409).json({
+            success: false,
+            error: {
+              code: "DUPLICATE_SO_HO_KHAU",
+              message: "Số hộ khẩu đã tồn tại trong hệ thống. Vui lòng chọn số khác.",
+            },
+          });
+        }
       }
 
       // validate chủ hộ thuộc đúng hộ
@@ -279,13 +330,20 @@ router.patch(
         });
       }
 
+      const updateFields: string[] = ['"chuHoId" = $1', '"trangThai" = \'active\''];
+      const params: any[] = [chuHoId];
+
+      if (soHoKhau !== undefined && soHoKhau.trim() !== "") {
+        updateFields.push('"soHoKhau" = $2');
+        params.push(soHoKhau.trim());
+      }
+
       const r = await query(
         `UPDATE ho_khau
-         SET "chuHoId" = $1,
-             "trangThai" = 'active'
-         WHERE id = $2
+         SET ${updateFields.join(', ')}
+         WHERE id = $${params.length + 1}
          RETURNING *`,
-        [chuHoId, hoKhauId]
+        [...params, hoKhauId]
       );
 
       if (r.rowCount === 0) {
@@ -434,3 +492,35 @@ router.patch(
 );
 
 export default router;
+
+// GET /ho-khau/:id/history - Lịch sử thay đổi của hộ khẩu
+router.get(
+  "/ho-khau/:id/history",
+  requireAuth,
+  requireTask("hokhau_nhankhau"),
+  async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          error: { code: "VALIDATION_ERROR", message: "Missing id" },
+        });
+      }
+
+      const r = await query(
+        `SELECT l.id, l."hanhDong", l.truong, l."noiDungCu", l."noiDungMoi",
+                l."nguoiThucHien", u."fullName" AS "nguoiThucHienName", l."createdAt"
+         FROM lich_su_thay_doi l
+         LEFT JOIN users u ON u.id = l."nguoiThucHien"
+         WHERE l.bang = 'ho_khau' AND l."banGhiId" = $1
+         ORDER BY l."createdAt" DESC`,
+        [id]
+      );
+
+      return res.json({ success: true, data: r.rows });
+    } catch (err) {
+      next(err);
+    }
+  }
+);

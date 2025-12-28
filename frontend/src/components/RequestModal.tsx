@@ -1,4 +1,4 @@
-import { FormEvent, useState, useEffect } from "react";
+import { FormEvent, useState, useEffect, useRef } from "react";
 
 export type RequestType =
   | "TAM_VANG"
@@ -6,6 +6,9 @@ export type RequestType =
   | "TACH_HO_KHAU"
   | "SUA_NHAN_KHAU"
   | "XOA_NHAN_KHAU";
+
+// Focus the modal for keyboard accessibility
+
 
 interface RequestModalProps {
   isOpen: boolean;
@@ -43,6 +46,21 @@ export default function RequestModal({
       setError(null);
     }
   }, [isOpen, type]);
+
+  // Accessibility: focus modal container when opened
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (isOpen) {
+      // small timeout to ensure elements are rendered
+      setTimeout(() => modalRef.current?.focus(), 0);
+    }
+  }, [isOpen]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      onClose();
+    }
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -92,23 +110,36 @@ export default function RequestModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={onClose}
+      onKeyDown={handleKeyDown}
     >
       <div
-        className="w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-6 shadow-xl"
+        ref={modalRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="request-modal-title"
+        className="w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-6 shadow-xl outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="mb-6 flex items-center justify-between border-b border-gray-200 pb-4">
-          <h2 className="text-2xl font-bold text-gray-900">
+          <h2 id="request-modal-title" className="text-2xl font-bold text-gray-900">
             {requestTypeLabels[type]}
           </h2>
           <button
             onClick={onClose}
+            aria-label="Đóng"
             className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
           >
             ✕
           </button>
         </div>
+
+        {householdInfo && (
+          <div className="mb-4 text-sm text-gray-600">
+            <span className="font-medium">Hộ khẩu:</span> {householdInfo.soHoKhau} — {householdInfo.diaChi}
+          </div>
+        )
 
         {/* Error Message */}
         {error && (
@@ -127,6 +158,7 @@ export default function RequestModal({
                   Chọn nhân khẩu <span className="text-red-500">*</span>
                 </label>
                 <select
+                  autoFocus
                   value={formData.nhanKhauId || ""}
                   onChange={(e) =>
                     setFormData({ ...formData, nhanKhauId: Number(e.target.value) })
@@ -197,6 +229,7 @@ export default function RequestModal({
                   Chọn nhân khẩu <span className="text-red-500">*</span>
                 </label>
                 <select
+                  autoFocus
                   value={formData.nhanKhauId || ""}
                   onChange={(e) =>
                     setFormData({ ...formData, nhanKhauId: Number(e.target.value) })
@@ -283,6 +316,7 @@ export default function RequestModal({
                   Chọn nhân khẩu cần sửa <span className="text-red-500">*</span>
                 </label>
                 <select
+                  autoFocus
                   value={formData.nhanKhauId || ""}
                   onChange={(e) =>
                     setFormData({ ...formData, nhanKhauId: Number(e.target.value) })

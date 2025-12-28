@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, FormEvent, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { apiService } from "../services/api";
 import { formatDateForInput, formatFromYMD, normalizeDateOnly } from "../utils/date";
@@ -31,6 +31,134 @@ interface NhanKhau {
   noiLamViec?: string;
   hoKhauId: number;
   isChuHo?: boolean; // Computed field from backend for backward compatibility
+  trangThai?: string; // Trạng thái cư trú
+  ghiChu?: string;
+}
+
+// Interface cho search và filter
+interface SearchFilters {
+  searchText: string;
+  ageGroup: string;
+  gender: string;
+  residenceStatus: string;
+  movementStatus?: string;
+  feedbackStatus?: string;
+}
+
+// Enum cho độ tuổi
+enum AgeGroup {
+  MAM_NON = "mam_non", // 3-5
+  CAP_1 = "cap_1",     // 6-10
+  CAP_2 = "cap_2",     // 11-14
+  CAP_3 = "cap_3",     // 15-17
+  LAO_DONG = "lao_dong", // 18-59
+  NGHI_HUU = "nghi_huu"  // >= 60
+}
+
+// Enum cho trạng thái biến động
+enum BienDongStatus {
+  MOI_SINH = "moi_sinh",
+  DA_CHUYEN_DI = "da_chuyen_di",
+  DA_QUA_DOI = "da_qua_doi",
+  BINH_THUONG = "binh_thuong"
+}
+
+// Interface cho phản ánh (used later if needed)
+
+// Helper functions
+function calculateAge(ngaySinh: string | undefined): number {
+  if (!ngaySinh) return 0;
+
+  try {
+    const birthDate = new Date(ngaySinh);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+
+    return age;
+  } catch {
+    return 0;
+  }
+}
+
+function getAgeGroup(age: number): AgeGroup {
+  if (age >= 3 && age <= 5) return AgeGroup.MAM_NON;
+  if (age >= 6 && age <= 10) return AgeGroup.CAP_1;
+  if (age >= 11 && age <= 14) return AgeGroup.CAP_2;
+  if (age >= 15 && age <= 17) return AgeGroup.CAP_3;
+  if (age >= 18 && age <= 59) return AgeGroup.LAO_DONG;
+  if (age >= 60) return AgeGroup.NGHI_HUU;
+  return "" as any; // For children under 3
+}
+
+function getBienDongStatus(nhanKhau: NhanKhau): BienDongStatus {
+  // Prefer backend-provided movementStatus if available
+  const mv = (nhanKhau as any).movementStatus;
+  if (mv === "moi_sinh") return BienDongStatus.MOI_SINH;
+  if (mv === "chuyen_di") return BienDongStatus.DA_CHUYEN_DI;
+  if (mv === "qua_doi" || nhanKhau.trangThai === "khai_tu") return BienDongStatus.DA_QUA_DOI;
+  // Fallback: check ghiChu for "Mới sinh"
+  if (nhanKhau.ghiChu?.includes("Mới sinh")) return BienDongStatus.MOI_SINH;
+  return BienDongStatus.BINH_THUONG;
+}
+
+function getResidenceStatus(trangThai?: string): string {
+  switch (trangThai) {
+    case "tam_tru": return "Tạm trú";
+    case "tam_vang": return "Tạm vắng";
+    default: return "Thường trú";
+  }
+}
+
+// pendingReportsCount is returned from backend as nhanKhau.pendingReportsCount
+
+function filterNhanKhauList(nhanKhauList: NhanKhau[], filters: SearchFilters): NhanKhau[] {
+  return nhanKhauList.filter(nhanKhau => {
+    // Search text filter
+    if (filters.searchText) {
+      const searchLower = filters.searchText.toLowerCase();
+      const nameMatch = nhanKhau.hoTen?.toLowerCase().includes(searchLower);
+      const cccdMatch = nhanKhau.cccd?.toLowerCase().includes(searchLower);
+      if (!nameMatch && !cccdMatch) return false;
+    }
+
+    // Age group filter
+    if (filters.ageGroup) {
+      const age = calculateAge(nhanKhau.ngaySinh);
+      const ageGroup = getAgeGroup(age);
+      if (ageGroup !== filters.ageGroup) return false;
+    }
+
+    // Gender filter
+    if (filters.gender && nhanKhau.gioiTinh !== filters.gender) {
+      return false;
+    }
+
+    // Residence status filter
+    if (filters.residenceStatus) {
+      const residenceStatus = getResidenceStatus(nhanKhau.trangThai);
+      if (residenceStatus !== filters.residenceStatus) return false;
+    }
+
+    // Movement/biến động filter
+    if (filters.movementStatus) {
+      const bd = getBienDongStatus(nhanKhau);
+      if (bd !== (filters.movementStatus as BienDongStatus)) return false;
+    }
+
+    // Feedback filter
+    if (filters.feedbackStatus) {
+      const pending = (nhanKhau as any).pendingReportsCount ?? 0;
+      if (filters.feedbackStatus === "has_new" && pending === 0) return false;
+      if (filters.feedbackStatus === "no_new" && pending > 0) return false;
+    }
+
+    return true;
+  });
 }
 
 interface NhanKhauForm {
@@ -74,6 +202,91 @@ export default function NhanKhau() {
     type: "success" | "error";
     message: string;
   } | null>(null);
+
+  // Search and filter states
+  const [filters, setFilters] = useState<SearchFilters>({
+    searchText: "",
+    ageGroup: "",
+    gender: "",
+    residenceStatus: "",
+    movementStatus: "",
+    feedbackStatus: "",
+  });
+  // Global search (popover) states
+  const [globalQuery, setGlobalQuery] = useState<string>("");
+  const [globalResults, setGlobalResults] = useState<any[]>([]);
+  const [isGlobalLoading, setIsGlobalLoading] = useState(false);
+  const [globalError, setGlobalError] = useState<string | null>(null);
+  const [isGlobalOpen, setIsGlobalOpen] = useState(false);
+  const [highlightNhanKhauId, setHighlightNhanKhauId] = useState<number | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  // (removed searchScope - global search handled separately if needed)
+
+  // Filtered list
+  const filteredNhanKhauList = useMemo(() => {
+    return filterNhanKhauList(nhanKhauList, filters);
+  }, [nhanKhauList, filters]);
+
+  // Debounced global search effect
+  useEffect(() => {
+    const q = globalQuery?.trim() || "";
+    if (q.length < 2) {
+      setIsGlobalOpen(false);
+      setGlobalResults([]);
+      setGlobalError(null);
+      return;
+    }
+
+    setIsGlobalLoading(true);
+    setGlobalError(null);
+    const id = setTimeout(async () => {
+      console.log("[GLOBAL SEARCH] querying:", q);
+      try {
+        const resp = await apiService.searchNhanKhauGlobal(q, 10);
+        if (resp && resp.success) {
+          setGlobalResults(resp.data || []);
+          setIsGlobalOpen(true);
+        } else {
+          setGlobalResults([]);
+          setGlobalError(resp?.error?.message || "Không có kết quả");
+          setIsGlobalOpen(true);
+        }
+      } catch (err: any) {
+        const msg = err?.status === 404 ? "Chưa có API search toàn TDP" : err?.message || "Lỗi khi tìm kiếm toàn TDP";
+        setGlobalError(msg);
+        setGlobalResults([]);
+        setIsGlobalOpen(true);
+      } finally {
+        setIsGlobalLoading(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(id);
+  }, [globalQuery]);
+
+  // Close popover on click outside or ESC
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node) &&
+        searchInputRef.current &&
+        !searchInputRef.current.contains(e.target as Node)
+      ) {
+        setIsGlobalOpen(false);
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setIsGlobalOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
 
   const emptyForm: NhanKhauForm = {
     hoKhauId: "",
@@ -387,44 +600,7 @@ export default function NhanKhau() {
     }
   };
 
-  const openViewNhanKhau = async (id: number) => {
-    setViewError(null);
-    setViewingNhanKhau(null);
-    setShowViewModal(true);
-    setViewLoading(true);
-    try {
-      const res = await apiService.getNhanKhauById(id);
-      if (res.success) {
-        const nk = res.data as any;
-        setViewingNhanKhau(nk);
-        setViewForm({
-          hoKhauId: nk.hoKhauId?.toString() || "",
-          hoTen: nk.hoTen || "",
-          biDanh: nk.biDanh || "",
-          cccd: nk.cccd || "",
-          ngayCapCCCD: formatDateForInput(nk.ngayCapCCCD),
-          noiCapCCCD: nk.noiCapCCCD || "",
-          ngaySinh: formatDateForInput(nk.ngaySinh),
-          gioiTinh: nk.gioiTinh || "",
-          noiSinh: nk.noiSinh || "",
-          nguyenQuan: nk.nguyenQuan || "",
-          danToc: nk.danToc || "",
-          tonGiao: nk.tonGiao || "",
-          quocTich: nk.quocTich || "Việt Nam",
-          quanHe: nk.quanHe || "",
-          ngayDangKyThuongTru: formatDateForInput(nk.ngayDangKyThuongTru),
-          diaChiThuongTruTruoc: nk.diaChiThuongTruTruoc || "",
-          ngheNghiep: nk.ngheNghiep || "",
-          noiLamViec: nk.noiLamViec || "",
-          ghiChu: nk.ghiChu || "",
-        });
-      }
-    } catch (err: any) {
-      setViewError(err.error?.message || "Lỗi khi tải thông tin nhân khẩu");
-    } finally {
-      setViewLoading(false);
-    }
-  };
+  // openViewNhanKhau removed (not used) — viewing handled via modal controls
 
   const handleUpdateNhanKhau = async (id: number) => {
     setViewError(null);
@@ -540,6 +716,46 @@ export default function NhanKhau() {
     }
   };
 
+  const openViewNhanKhau = async (id: number) => {
+    console.log("[UI] openViewNhanKhau", id);
+    setViewError(null);
+    setViewingNhanKhau(null);
+    setShowViewModal(true);
+    setViewLoading(true);
+    try {
+      const res = await apiService.getNhanKhauById(id);
+      if (res.success) {
+        const nk = res.data as any;
+        setViewingNhanKhau(nk);
+        setViewForm({
+          hoKhauId: nk.hoKhauId?.toString() || "",
+          hoTen: nk.hoTen || "",
+          biDanh: nk.biDanh || "",
+          cccd: nk.cccd || "",
+          ngayCapCCCD: formatDateForInput ? formatDateForInput(nk.ngayCapCCCD) : (nk.ngayCapCCCD || ""),
+          noiCapCCCD: nk.noiCapCCCD || "",
+          ngaySinh: formatDateForInput ? formatDateForInput(nk.ngaySinh) : (nk.ngaySinh || ""),
+          gioiTinh: nk.gioiTinh || "",
+          noiSinh: nk.noiSinh || "",
+          nguyenQuan: nk.nguyenQuan || "",
+          danToc: nk.danToc || "",
+          tonGiao: nk.tonGiao || "",
+          quocTich: nk.quocTich || "Việt Nam",
+          quanHe: nk.quanHe || "",
+          ngayDangKyThuongTru: formatDateForInput ? formatDateForInput(nk.ngayDangKyThuongTru) : (nk.ngayDangKyThuongTru || ""),
+          diaChiThuongTruTruoc: nk.diaChiThuongTruTruoc || "",
+          ngheNghiep: nk.ngheNghiep || "",
+          noiLamViec: nk.noiLamViec || "",
+          ghiChu: nk.ghiChu || "",
+        });
+      }
+    } catch (err: any) {
+      setViewError(err.error?.message || "Lỗi khi tải thông tin nhân khẩu");
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
   const handleActivate = async (hoKhauId: number, chuHoId: number) => {
     setError(null);
     setToast(null);
@@ -651,6 +867,12 @@ export default function NhanKhau() {
 
   return (
     <div className="space-y-6">
+      {/* DEMO banner to verify correct file edited */}
+      <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-4">
+        <div className="text-center text-2xl font-bold text-emerald-800">
+          BỘ LỌC TÌM KIẾM NÂNG CAO (DEMO)
+        </div>
+      </div>
       {toast && (
         <div className="pointer-events-none fixed inset-x-0 top-4 z-[200] flex justify-center px-4">
           <div
@@ -697,6 +919,8 @@ export default function NhanKhau() {
           + Thêm nhân khẩu
         </button>
       </div>
+
+      {/* Advanced Filter Card is shown below the household dropdown (kept single instance) */}
 
       {/* View & Edit Modal */}
       {showViewModal && viewingNhanKhau && (
@@ -1034,23 +1258,208 @@ export default function NhanKhau() {
         </div>
       )}
 
-      {/* Select Hộ khẩu */}
+      {/* Header với Select Hộ khẩu và Actions */}
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Chọn hộ khẩu
-        </label>
-        <select
-          value={selectedHoKhauId || ""}
-          onChange={(e) => setSelectedHoKhauId(Number(e.target.value))}
-          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-        >
-          {hoKhauList.map((hk) => (
-            <option key={hk.id} value={hk.id}>
-              {hk.soHoKhau} - {hk.diaChi} (
-              {hk.trangThai === "active" ? "Đã kích hoạt" : "Chưa kích hoạt"})
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">
+            Quản lý Nhân khẩu
+          </h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                // TODO: Implement xem lịch sử thay đổi của hộ khẩu
+                setToast({ type: "error", message: "Tính năng đang phát triển" });
+              }}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              📋 Xem lịch sử thay đổi
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Chọn hộ khẩu
+            </label>
+            <select
+              value={selectedHoKhauId || ""}
+              onChange={(e) => setSelectedHoKhauId(Number(e.target.value))}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="">Chọn hộ khẩu</option>
+              {hoKhauList.map((hk) => (
+                <option key={hk.id} value={hk.id}>
+                  {hk.soHoKhau} - {hk.diaChi} (
+                  {hk.trangThai === "active" ? "Đã kích hoạt" : "Chưa kích hoạt"})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Advanced Filter Card (prominent) */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm mt-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-semibold text-gray-800">Bộ lọc tìm kiếm nâng cao</h3>
+          <div className="flex items-center gap-2">
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+              onClick={() => {
+                showToast("Xuất báo cáo (chức năng demo)", "success");
+              }}
+            >
+              📤 Xuất báo cáo
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+          <div className="md:col-span-2">
+            <input
+              type="text"
+              placeholder="Tìm theo họ tên, CCCD..."
+              ref={searchInputRef}
+              value={globalQuery}
+              onChange={(e) => {
+                const v = e.target.value;
+                setFilters({ ...filters, searchText: v });
+                setGlobalQuery(v);
+              }}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() =>
+                setFilters({
+                  searchText: "",
+                  ageGroup: "",
+                  gender: "",
+                  residenceStatus: "",
+                  movementStatus: "",
+                  feedbackStatus: "",
+                })
+              }
+              className="rounded-md bg-white border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              Xoá lọc
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3 relative">
+          <select
+            value={filters.ageGroup}
+            onChange={(e) => setFilters({ ...filters, ageGroup: e.target.value })}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">Độ tuổi: Tất cả</option>
+            <option value={AgeGroup.MAM_NON}>Mầm non (3-5)</option>
+            <option value={AgeGroup.CAP_1}>Cấp 1 (6-10)</option>
+            <option value={AgeGroup.CAP_2}>Cấp 2 (11-14)</option>
+            <option value={AgeGroup.CAP_3}>Cấp 3 (15-17)</option>
+            <option value={AgeGroup.LAO_DONG}>Lao động (18-59)</option>
+            <option value={AgeGroup.NGHI_HUU}>Nghỉ hưu (≥60)</option>
+          </select>
+
+          <select
+            value={filters.gender}
+            onChange={(e) => setFilters({ ...filters, gender: e.target.value })}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">Giới tính: Tất cả</option>
+            <option value="nam">Nam</option>
+            <option value="nu">Nữ</option>
+            <option value="khac">Khác</option>
+          </select>
+
+          <select
+            value={filters.residenceStatus}
+            onChange={(e) => setFilters({ ...filters, residenceStatus: e.target.value })}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">Trạng thái cư trú: Tất cả</option>
+            <option value="Thường trú">Thường trú</option>
+            <option value="Tạm trú">Tạm trú</option>
+            <option value="Tạm vắng">Tạm vắng</option>
+          </select>
+
+          <select
+            value={filters.movementStatus}
+            onChange={(e) => setFilters({ ...filters, movementStatus: e.target.value })}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">Biến động: Tất cả</option>
+            <option value={BienDongStatus.MOI_SINH}>Mới sinh</option>
+            <option value={BienDongStatus.DA_CHUYEN_DI}>Đã chuyển đi</option>
+            <option value={BienDongStatus.DA_QUA_DOI}>Đã qua đời</option>
+            <option value={BienDongStatus.BINH_THUONG}>Bình thường</option>
+          </select>
+
+          <select
+            value={filters.feedbackStatus}
+            onChange={(e) => setFilters({ ...filters, feedbackStatus: e.target.value })}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+          >
+            <option value="">Phản ánh: Tất cả</option>
+            <option value="has_new">Có phản ánh mới</option>
+            <option value="no_new">Không có phản ánh mới</option>
+          </select>
+        </div>
+
+        <div className="mt-3 text-sm text-gray-600">
+          Đang lọc: <span className="font-semibold">{filteredNhanKhauList.length}</span> kết quả / Tổng{" "}
+          <span className="font-semibold">{nhanKhauList.length}</span>
+        </div>
+        {/* Global search popover */}
+        {isGlobalOpen && (
+          <div
+            ref={popoverRef}
+            className="absolute left-0 right-0 mt-2 z-50 rounded-md border border-gray-200 bg-white shadow-lg p-3 max-h-64 overflow-y-auto"
+            style={{ top: "110%" }}
+          >
+            {isGlobalLoading ? (
+              <div className="text-sm text-gray-500">Đang tìm kiếm...</div>
+            ) : globalError ? (
+              <div className="text-sm text-red-500">{globalError}</div>
+            ) : globalResults.length === 0 ? (
+              <div className="text-sm text-gray-500">Không tìm thấy kết quả</div>
+            ) : (
+              <ul className="space-y-2">
+                {globalResults.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex items-center justify-between rounded-md p-2 hover:bg-gray-50 cursor-pointer"
+                    onClick={() => {
+                      // Set household and load members
+                      setSelectedHoKhauId(r.hoKhauId);
+                      loadNhanKhauList(r.hoKhauId);
+                      setIsGlobalOpen(false);
+                      // highlight the selected person after a short delay (after list loads)
+                      setTimeout(() => {
+                        setHighlightNhanKhauId(r.id);
+                        const tr = document.querySelector(`[data-nk-id='${r.id}']`);
+                        if (tr) (tr as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center" });
+                        setTimeout(() => setHighlightNhanKhauId(null), 3000);
+                      }, 500);
+                    }}
+                  >
+                    <div>
+                      <div className="font-medium text-gray-900">{r.hoTen}</div>
+                      <div className="text-xs text-gray-500">{r.cccd || "-"}</div>
+                    </div>
+                    <div className="text-xs text-gray-600 text-right">
+                      <div className="font-medium">{r.soHoKhau || r.hoKhauId}</div>
+                      <div>{r.diaChi ? String(r.diaChi).slice(0, 40) : "-"}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Activate Button */}
@@ -1540,10 +1949,15 @@ export default function NhanKhau() {
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 p-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            Danh sách nhân khẩu ({nhanKhauList.length})
+            Danh sách nhân khẩu ({filteredNhanKhauList.length})
             {selectedHoKhau && (
               <span className="ml-2 text-sm font-normal text-gray-500">
                 - Hộ khẩu: {selectedHoKhau.soHoKhau}
+              </span>
+            )}
+            {filteredNhanKhauList.length !== nhanKhauList.length && (
+              <span className="ml-2 text-xs font-normal text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                Đã lọc: {filteredNhanKhauList.length}/{nhanKhauList.length}
               </span>
             )}
           </h2>
@@ -1559,6 +1973,10 @@ export default function NhanKhau() {
           <div className="p-8 text-center text-gray-500">
             Chưa có nhân khẩu nào trong hộ khẩu này. Hãy thêm nhân khẩu mới!
           </div>
+        ) : filteredNhanKhauList.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">
+            Không tìm thấy nhân khẩu nào phù hợp với bộ lọc.
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -1571,13 +1989,25 @@ export default function NhanKhau() {
                     CCCD
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
-                    Quan hệ
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Giới tính
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Ngày sinh
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    Độ tuổi
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    Quan hệ
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    Trạng thái cư trú
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    Biến động
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    Phản ánh
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Thao tác
@@ -1585,13 +2015,16 @@ export default function NhanKhau() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {sortedNhanKhauList.map((nk) => (
+                {filteredNhanKhauList.map((nk) => (
                   <tr
                     key={nk.id}
                     className={`hover:bg-gray-50 ${
                       isChuHo(nk) ? "bg-blue-50/50" : ""
                     }`}
+                    data-nk-id={nk.id}
+                    style={highlightNhanKhauId === nk.id ? { backgroundColor: "#fff7d6" } : undefined}
                   >
+                    {/* Họ tên */}
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       {nk.hoTen}
                       {isChuHo(nk) && (
@@ -1600,13 +2033,13 @@ export default function NhanKhau() {
                         </span>
                       )}
                     </td>
+
+                    {/* CCCD */}
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {nk.cccd || "-"}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {quanHeOptions.find((opt) => opt.value === nk.quanHe)
-                        ?.label || nk.quanHe}
-                    </td>
+
+                    {/* Giới tính */}
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {nk.gioiTinh === "nam"
                         ? "Nam"
@@ -1616,18 +2049,86 @@ export default function NhanKhau() {
                         ? "Khác"
                         : "-"}
                     </td>
+
+                    {/* Ngày sinh */}
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {nk.ngaySinh
                         ? formatFromYMD(nk.ngaySinh)
                         : "-"}
                     </td>
-                    <td className="px-4 py-3 text-right text-sm text-gray-600 space-x-2">
+
+                    {/* Độ tuổi */}
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {nk.ngaySinh ? `${calculateAge(nk.ngaySinh)} tuổi` : "-"}
+                    </td>
+
+                    {/* Quan hệ */}
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {quanHeOptions.find((opt) => opt.value === nk.quanHe)
+                        ?.label || nk.quanHe}
+                    </td>
+
+                    {/* Trạng thái cư trú */}
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {((nk as any).residentStatus === "tam_tru" && "Tạm trú") ||
+                        ((nk as any).residentStatus === "tam_vang" && "Tạm vắng") ||
+                        "Thường trú"}
+                    </td>
+
+                    {/* Biến động */}
+                    <td className="px-4 py-3 text-sm">
+                      {(() => {
+                        const status = getBienDongStatus(nk);
+                        const statusLabels = {
+                          [BienDongStatus.MOI_SINH]: { text: "Mới sinh", color: "bg-green-100 text-green-700" },
+                          [BienDongStatus.DA_CHUYEN_DI]: { text: "Đã chuyển đi", color: "bg-red-100 text-red-700" },
+                          [BienDongStatus.DA_QUA_DOI]: { text: "Đã qua đời", color: "bg-gray-100 text-gray-700" },
+                          [BienDongStatus.BINH_THUONG]: { text: "Bình thường", color: "bg-blue-100 text-blue-700" },
+                        };
+                        const label = statusLabels[status];
+                        return (
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${label.color}`}>
+                            {label.text}
+                          </span>
+                        );
+                      })()}
+                    </td>
+
+                    {/* Phản ánh */}
+                    <td className="px-4 py-3 text-center">
+                      {(() => {
+                      const count = (nk as any).pendingReportsCount ?? 0;
+                      return count > 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-700">
+                          {count}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">0</span>
+                      );
+                      })()}
+                    </td>
+
+                    {/* Thao tác */}
+                    <td className="px-4 py-3 text-right text-sm text-gray-600 space-x-1">
                       <button
+                        type="button"
                         onClick={() => openViewNhanKhau(nk.id)}
-                        className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-blue-300 hover:text-blue-600"
-                        title="Xem/Sửa"
+                        className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:border-orange-300 hover:text-orange-600"
+                        title="Ghi nhận phản ánh"
                       >
-                        👁 Xem
+                        👁️ Xem
+                      </button>
+                      <button
+                        onClick={() => {
+                          // open history for this person (reuse ho khau history endpoint)
+                          // For now show toast (backend history by nhan_khau implemented)
+                          // We can implement modal similar to HoKhau's history if you want
+                          setToast({ type: "success", message: "Chức năng xem lịch sử nhân khẩu (sẽ mở modal)" });
+                        }}
+                        className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-700 hover:border-blue-300 hover:text-blue-600"
+                        title="Xem lịch sử"
+                      >
+                        📋 Lịch sử
                       </button>
                     </td>
                   </tr>

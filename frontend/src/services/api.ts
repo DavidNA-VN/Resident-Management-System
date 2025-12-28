@@ -87,11 +87,11 @@ class ApiService {
     options: RequestInit = {}
   ): Promise<T> {
     const token = this.getAuthToken();
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json",
       "Cache-Control": "no-cache, no-store, must-revalidate",
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     };
 
     if (token) {
@@ -216,8 +216,13 @@ class ApiService {
     );
   }
 
+  async getHoKhauHistory(id: number) {
+    return this.request<{ success: boolean; data: any[] }>(`/ho-khau/${id}/history`, {
+      method: "GET",
+    });
+  }
+
   async createHoKhau(data: {
-    soHoKhau: string;
     diaChi: string;
     tinhThanh?: string;
     quanHuyen?: string;
@@ -249,7 +254,7 @@ class ApiService {
       ghiChu?: string;
     }
   ) {
-    return this.request<{ success: boolean; data: any }>(`/ho-khau/${id}`, {
+    return this.request<{ success: boolean; data: any; error?: { code: string; message: string } }>(`/ho-khau/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
@@ -383,6 +388,23 @@ class ApiService {
     }>("/citizen/household", {
       method: "GET",
     });
+  }
+
+  // Global search for nhan khau across TDP (backend)
+  async searchNhanKhau(q: string, limit: number = 100, offset: number = 0) {
+    const params = new URLSearchParams();
+    params.append("q", q);
+    params.append("limit", String(limit));
+    params.append("offset", String(offset));
+    return this.request<{ success: boolean; data: any[]; error?: { code: string; message: string } }>(
+      `/nhan-khau/search?${params.toString()}`,
+      { method: "GET" }
+    );
+  }
+
+  // Alias for global search (kept for clearer intent)
+  async searchNhanKhauGlobal(q: string, limit: number = 10) {
+    return this.searchNhanKhau(q, limit, 0);
   }
 
   async createRequest(data: { type: string; payload: any }) {

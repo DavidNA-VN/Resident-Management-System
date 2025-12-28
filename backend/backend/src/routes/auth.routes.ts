@@ -1,8 +1,8 @@
 import { Router } from "express";
-import jwt from "jsonwebtoken";
+import * as jwt from "jsonwebtoken";
 import { query } from "../db";
 import { requireAuth, RoleCode, TaskCode } from "../middlewares/auth.middleware";
-import { normalizeCCCD, isValidCCCD } from "../utils/cccd";
+import { normalizeCCCD } from "../utils/cccd";
 
 const router = Router();
 
@@ -73,7 +73,7 @@ router.post("/auth/register", async (req, res, next) => {
     // Force task = NULL nếu role != "can_bo"
     const finalTask = role === "can_bo" ? task : null;
 
-    let finalUsername = username;
+    let finalUsername: string = username;
 
     // Đối với role="nguoi_dan": username chính là CCCD (normalize)
     if (role === "nguoi_dan") {
@@ -88,9 +88,9 @@ router.post("/auth/register", async (req, res, next) => {
       }
 
       // Chuẩn hoá và validate CCCD
-      finalUsername = normalizeCCCD(username);
+      const normalizedCCCD = normalizeCCCD(username);
 
-      if (!finalUsername) {
+      if (!normalizedCCCD) {
         return res.status(400).json({
           success: false,
           error: {
@@ -99,6 +99,8 @@ router.post("/auth/register", async (req, res, next) => {
           },
         });
       }
+
+      finalUsername = normalizedCCCD;
 
       // Validate độ dài CCCD (thường 9-12 ký tự)
       if (finalUsername.length < 9 || finalUsername.length > 12) {

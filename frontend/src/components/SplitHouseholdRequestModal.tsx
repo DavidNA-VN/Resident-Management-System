@@ -1,4 +1,4 @@
-import { FormEvent, useState, useEffect } from "react";
+import { FormEvent, useState, useEffect, useRef } from "react";
 
 interface NhanKhau {
   id: number;
@@ -65,9 +65,11 @@ export default function SplitHouseholdRequestModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Reset form khi mở/đóng modal
+  // Focus container and reset form khi mở/đóng modal
+  const modalRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (isOpen) {
+      setTimeout(() => modalRef.current?.focus(), 0);
       setSelectedNhanKhauIds([]);
       setNewChuHoId(null);
       setNewAddress("");
@@ -77,6 +79,12 @@ export default function SplitHouseholdRequestModal({
       setErrors({});
     }
   }, [isOpen]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      onClose();
+    }
+  };
 
   const handleToggleNhanKhau = (id: number) => {
     setSelectedNhanKhauIds((prev) => {
@@ -168,18 +176,25 @@ export default function SplitHouseholdRequestModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={onClose}
+      onKeyDown={handleKeyDown}
     >
       <div
-        className="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white shadow-xl"
+        ref={modalRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="split-household-title"
+        className="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white shadow-xl outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-          <h2 className="text-2xl font-bold text-gray-900">
+          <h2 id="split-household-title" className="text-2xl font-bold text-gray-900">
             Yêu cầu tách hộ khẩu
           </h2>
           <button
             onClick={onClose}
+            aria-label="Đóng"
             className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
           >
             ✕

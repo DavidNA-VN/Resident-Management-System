@@ -2,6 +2,7 @@ import { Router } from "express";
 import { query } from "../db";
 import { requireAuth, requireTask } from "../middlewares/auth.middleware";
 import { normalizeDateOnly } from "../utils/date";
+import { requireRole } from "../middlewares/auth.middleware";
 
 const router = Router();
 
@@ -30,16 +31,36 @@ router.get(
       // Get nhan khau list
       const r = await query(
         `SELECT
-          id, "hoTen", "biDanh", cccd,
-          "ngayCapCCCD"::text AS "ngayCapCCCD",
-          "noiCapCCCD",
-          "ngaySinh"::text AS "ngaySinh",
-          "gioiTinh", "noiSinh", "nguyenQuan", "danToc", "tonGiao", "quocTich",
-          "hoKhauId", "quanHe",
-          "ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
-          "diaChiThuongTruTruoc", "ngheNghiep", "noiLamViec", "ghiChu",
-          "trangThai", "userId", "createdAt", "updatedAt"
-         FROM nhan_khau WHERE "hoKhauId" = $1 ORDER BY "createdAt" DESC`,
+          nk.id, nk."hoTen", nk."biDanh", nk.cccd,
+          nk."ngayCapCCCD"::text AS "ngayCapCCCD",
+          nk."noiCapCCCD",
+          nk."ngaySinh"::text AS "ngaySinh",
+          nk."gioiTinh", nk."noiSinh", nk."nguyenQuan", nk."danToc", nk."tonGiao", nk."quocTich",
+          nk."hoKhauId", nk."quanHe",
+          nk."ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
+          nk."diaChiThuongTruTruoc", nk."ngheNghiep", nk."noiLamViec", nk."ghiChu",
+          nk."trangThai", nk."userId", nk."createdAt", nk."updatedAt",
+          -- residentStatus derived from trangThai
+          CASE
+            WHEN nk."trangThai" = 'tam_tru' THEN 'tam_tru'
+            WHEN nk."trangThai" = 'tam_vang' THEN 'tam_vang'
+            ELSE 'thuong_tru'
+          END AS "residentStatus",
+          -- movementStatus: prefer khai_sinh in bien_dong, else map from trangThai
+          CASE
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh'
+            ) THEN 'moi_sinh'
+            WHEN nk."trangThai" = 'chuyen_di' THEN 'chuyen_di'
+            WHEN nk."trangThai" = 'khai_tu' THEN 'qua_doi'
+            ELSE 'binh_thuong'
+          END AS "movementStatus",
+          -- count pending reports linked by user account (phan_anh.nguoiPhanAnh = users.id = nk.userId)
+          COALESCE((
+            SELECT COUNT(*) FROM phan_anh pa
+            WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')
+          ),0) AS "pendingReportsCount"
+         FROM nhan_khau nk WHERE nk."hoKhauId" = $1 ORDER BY nk."createdAt" DESC`,
         [Number(hoKhauId)]
       );
 
@@ -276,16 +297,28 @@ router.get(
 
       const r = await query(`
         SELECT
-          id, "hoTen", "biDanh", cccd,
-          "ngayCapCCCD"::text AS "ngayCapCCCD",
-          "noiCapCCCD",
-          "ngaySinh"::text AS "ngaySinh",
-          "gioiTinh", "noiSinh", "nguyenQuan", "danToc", "tonGiao", "quocTich",
-          "hoKhauId", "quanHe",
-          "ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
-          "diaChiThuongTruTruoc", "ngheNghiep", "noiLamViec", "ghiChu",
-          "trangThai", "userId", "createdAt", "updatedAt"
-         FROM nhan_khau WHERE id = $1`, [id]);
+          nk.id, nk."hoTen", nk."biDanh", nk.cccd,
+          nk."ngayCapCCCD"::text AS "ngayCapCCCD",
+          nk."noiCapCCCD",
+          nk."ngaySinh"::text AS "ngaySinh",
+          nk."gioiTinh", nk."noiSinh", nk."nguyenQuan", nk."danToc", nk."tonGiao", nk."quocTich",
+          nk."hoKhauId", nk."quanHe",
+          nk."ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
+          nk."diaChiThuongTruTruoc", nk."ngheNghiep", nk."noiLamViec", nk."ghiChu",
+          nk."trangThai", nk."userId", nk."createdAt", nk."updatedAt",
+          CASE
+            WHEN nk."trangThai" = 'tam_tru' THEN 'tam_tru'
+            WHEN nk."trangThai" = 'tam_vang' THEN 'tam_vang'
+            ELSE 'thuong_tru'
+          END AS "residentStatus",
+          CASE
+            WHEN EXISTS (SELECT 1 FROM bien_dong bd WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh') THEN 'moi_sinh'
+            WHEN nk."trangThai" = 'chuyen_di' THEN 'chuyen_di'
+            WHEN nk."trangThai" = 'khai_tu' THEN 'qua_doi'
+            ELSE 'binh_thuong'
+          END AS "movementStatus",
+          COALESCE((SELECT COUNT(*) FROM phan_anh pa WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')),0) AS "pendingReportsCount"
+         FROM nhan_khau nk WHERE nk.id = $1`, [id]);
       if (r.rowCount === 0) {
         return res.status(404).json({
           success: false,
@@ -294,6 +327,41 @@ router.get(
       }
 
       return res.json({ success: true, data: r.rows[0] });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * GET /nhan-khau/:id/history
+ * Lấy lịch sử thay đổi cho nhân khẩu (audit)
+ */
+router.get(
+  "/nhan-khau/:id/history",
+  requireAuth,
+  requireTask("hokhau_nhankhau"),
+  async (req, res, next) => {
+    try {
+      const id = Number(req.params.id);
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          error: { code: "VALIDATION_ERROR", message: "Missing id" },
+        });
+      }
+
+      const r = await query(
+        `SELECT l.id, l."hanhDong", l.truong, l."noiDungCu", l."noiDungMoi",
+                l."nguoiThucHien", u."fullName" AS "nguoiThucHienName", l."createdAt"
+         FROM lich_su_thay_doi l
+         LEFT JOIN users u ON u.id = l."nguoiThucHien"
+         WHERE l.bang = 'nhan_khau' AND l."banGhiId" = $1
+         ORDER BY l."createdAt" DESC`,
+        [id]
+      );
+
+      return res.json({ success: true, data: r.rows });
     } catch (err) {
       next(err);
     }
@@ -527,3 +595,46 @@ router.patch(
 );
 
 export default router;
+
+// Global search endpoint for nhan khau across TDP
+router.get(
+  "/nhan-khau/search",
+  requireAuth,
+  requireRole(["to_truong", "to_pho", "can_bo"]),
+  async (req, res, next) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      const limit = Number(req.query.limit || 100);
+      const offset = Number(req.query.offset || 0);
+
+      if (!q || q.length < 2) {
+        return res.status(400).json({
+          success: false,
+          error: { code: "VALIDATION_ERROR", message: "Query q is required (min 2 chars)" },
+        });
+      }
+      const searchParam = `%${q}%`;
+      const result = await query(
+        `SELECT
+           nk.id, nk."hoTen", nk."biDanh", nk.cccd,
+           nk."ngayCapCCCD"::text AS "ngayCapCCCD",
+           nk."noiCapCCCD",
+           nk."ngaySinh"::text AS "ngaySinh",
+           nk."gioiTinh", nk."noiSinh", nk."nguyenQuan", nk."danToc", nk."tonGiao", nk."quocTich",
+           nk."hoKhauId", nk."quanHe", nk."trangThai",
+           hk."soHoKhau" AS "soHoKhau",
+           hk."diaChi" AS "diaChi"
+         FROM nhan_khau nk
+         LEFT JOIN ho_khau hk ON hk.id = nk."hoKhauId"
+         WHERE (nk."hoTen" ILIKE $1 OR nk.cccd ILIKE $1)
+         ORDER BY nk."createdAt" DESC
+         LIMIT $2 OFFSET $3`,
+        [searchParam, limit, offset]
+      );
+
+      return res.json({ success: true, data: result.rows });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
