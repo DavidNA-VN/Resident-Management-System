@@ -137,14 +137,15 @@ router.post("/phan-anh", requireAuth, async (req, res, next) => {
 
 /**
  * GET /feedback/me
- * Lấy danh sách phản ánh của người dân hiện tại
+ * Lấy danh sách phản ánh của người dân hiện tại kèm nội dung phản hồi
  */
 router.get("/feedback/me", requireAuth, requireRole(["nguoi_dan"]), async (req, res, next) => {
   try {
     const userId = req.user!.id;
 
+    // SỬA TẠI ĐÂY: Thêm cột "ketQuaXuLy" và "ngayXuLy" để người dân thấy phản hồi
     const result = await query(
-      `SELECT id, "tieuDe", "noiDung", loai, "trangThai", "ngayTao", "updatedAt"
+      `SELECT id, "tieuDe", "noiDung", loai, "trangThai", "ngayTao", "updatedAt", "ketQuaXuLy", "ngayXuLy"
         FROM phan_anh
         WHERE "nguoiPhanAnh" = $1
         ORDER BY "ngayTao" DESC`,

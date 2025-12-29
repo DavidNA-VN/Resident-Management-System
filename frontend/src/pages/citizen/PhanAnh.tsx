@@ -8,6 +8,9 @@ interface Feedback {
   loai: string;
   trangThai: string;
   ngayTao: string;
+  // Thêm các trường dữ liệu mới để nhận phản hồi từ Backend
+  ketQuaXuLy?: string; 
+  ngayXuLy?: string;
 }
 
 const loaiLabels: Record<string, string> = {
@@ -233,7 +236,26 @@ export default function PhanAnh() {
                   </div>
                 </div>
                 <p className="text-sm text-gray-700 mb-2">{feedback.noiDung}</p>
-                <p className="text-xs text-gray-500">
+
+                {/* HIỂN THỊ PHẦN PHẢN HỒI NẾU CÓ */}
+                {feedback.ketQuaXuLy && (
+                  <div className="mt-3 p-3 bg-emerald-50 border border-emerald-100 rounded-lg shadow-inner">
+                    <p className="text-xs font-bold text-emerald-700 uppercase mb-1 flex items-center gap-1">
+                      <span>💬</span> Phản hồi từ Tổ dân phố:
+                    </p>
+                    <p className="text-sm text-emerald-800 font-medium">
+                      {feedback.ketQuaXuLy}
+                    </p>
+                    {feedback.ngayXuLy && (
+                      <p className="text-[10px] text-emerald-600 mt-2 italic text-right">
+                        Cập nhật lúc:{" "}
+                        {new Date(feedback.ngayXuLy).toLocaleString("vi-VN")}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-500 mt-3 border-t pt-2">
                   Ngày gửi:{" "}
                   {new Date(feedback.ngayTao).toLocaleDateString("vi-VN", {
                     year: "numeric",
@@ -251,5 +273,3 @@ export default function PhanAnh() {
     </div>
   );
 }
-
-
