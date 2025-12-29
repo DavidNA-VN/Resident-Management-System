@@ -34,6 +34,7 @@ interface NhanKhau {
   ngheNghiep?: string;
   noiLamViec?: string;
   hoKhauId: number;
+  soHoKhau?: string; // household code for cross-household display
   isChuHo?: boolean; // Computed field from backend for backward compatibility
   trangThai?: string;
   updatedAt?: string;
@@ -136,7 +137,8 @@ const filterNhanKhauList = (list: NhanKhau[], filters: SearchFilters) => {
     if (searchLower) {
       const nameMatch = nhanKhau.hoTen?.toLowerCase().includes(searchLower);
       const cccdMatch = nhanKhau.cccd?.toLowerCase().includes(searchLower);
-      if (!nameMatch && !cccdMatch) return false;
+      const soHoMatch = nhanKhau.soHoKhau?.toLowerCase().includes(searchLower);
+      if (!nameMatch && !cccdMatch && !soHoMatch) return false;
     }
 
     if (filters.ageGroup) {
@@ -355,29 +357,51 @@ export default function NhanKhau() {
     return list;
   }, [nhanKhauList]);
 
-  // Debounced global search effect
+  // Debounced global search effect (no household selected). Supports filter-only queries.
   useEffect(() => {
+    if (selectedHoKhauId) return; // Household selected => use household list, not global search
+
     const q = globalQuery?.trim() || "";
-    if (q.length < 2) {
+    const hasFilterSelections =
+      filters.ageGroup ||
+      filters.gender ||
+      filters.residenceStatus ||
+      filters.movementStatus ||
+      filters.feedbackStatus;
+
+    if (!hasFilterSelections && q.length < 2) {
       setIsGlobalOpen(false);
       setGlobalResults([]);
       setGlobalError(null);
+      setNhanKhauList([]);
       return;
     }
 
     setIsGlobalLoading(true);
     setGlobalError(null);
     const id = setTimeout(async () => {
-      console.log("[GLOBAL SEARCH] querying:", q);
+      console.log("[GLOBAL SEARCH] querying:", q, "filters", {
+        ...filters,
+        searchText: undefined,
+      });
       try {
-        const resp = await apiService.searchNhanKhauGlobal(q, 10);
+        const resp = await apiService.searchNhanKhauGlobal(q, 100, {
+          ageGroup: filters.ageGroup || undefined,
+          gender: filters.gender || undefined,
+          residenceStatus: filters.residenceStatus || undefined,
+          movementStatus: filters.movementStatus || undefined,
+          feedbackStatus: filters.feedbackStatus || undefined,
+        });
         if (resp && resp.success) {
           setGlobalResults(resp.data || []);
           setIsGlobalOpen(true);
+          setNhanKhauList(resp.data || []);
         } else {
           setGlobalResults([]);
           setGlobalError(resp?.error?.message || "Không có kết quả");
           setIsGlobalOpen(true);
+          setNhanKhauList([]);
+          showToast(resp?.error?.message || "Không có kết quả", "error");
         }
       } catch (err: any) {
         const msg =
@@ -387,13 +411,15 @@ export default function NhanKhau() {
         setGlobalError(msg);
         setGlobalResults([]);
         setIsGlobalOpen(true);
+        setNhanKhauList([]);
+        showToast(msg, "error");
       } finally {
         setIsGlobalLoading(false);
       }
     }, 300);
 
     return () => clearTimeout(id);
-  }, [globalQuery]);
+  }, [globalQuery, selectedHoKhauId, filters.ageGroup, filters.gender, filters.residenceStatus, filters.movementStatus, filters.feedbackStatus]);
 
   // Close popover on click outside or ESC
   useEffect(() => {
@@ -541,9 +567,6 @@ export default function NhanKhau() {
       const response = await apiService.getHoKhauList();
       if (response.success) {
         setHoKhauList(response.data);
-        if (response.data.length > 0 && !selectedHoKhauId) {
-          setSelectedHoKhauId(response.data[0].id);
-        }
       }
     } catch (err: any) {
       const message = err.error?.message || "Lỗi khi tải danh sách hộ khẩu";
@@ -1030,12 +1053,6 @@ export default function NhanKhau() {
 
   return (
     <div className="space-y-6">
-      {/* DEMO banner to verify correct file edited */}
-      <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-4">
-        <div className="text-center text-2xl font-bold text-emerald-800">
-          BỘ LỌC TÌM KIẾM NÂNG CAO (DEMO)
-        </div>
-      </div>
       {toast && (
         <div className="pointer-events-none fixed inset-x-0 top-4 z-[200] flex justify-center px-4">
           <div
@@ -1602,8 +1619,11 @@ export default function NhanKhau() {
               Chọn hộ khẩu
             </label>
             <select
-              value={selectedHoKhauId || ""}
-              onChange={(e) => setSelectedHoKhauId(Number(e.target.value))}
+              value={selectedHoKhauId ?? ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedHoKhauId(val ? Number(val) : null);
+              }}
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             >
               <option value="">Chọn hộ khẩu</option>
@@ -2313,11 +2333,11 @@ export default function NhanKhau() {
 
         {isLoading && nhanKhauList.length === 0 ? (
           <div className="p-8 text-center text-gray-500">Đang tải...</div>
-        ) : !selectedHoKhauId ? (
+        ) : selectedHoKhauId === null && nhanKhauList.length === 0 ? (
           <div className="p-8 text-center text-gray-500">
-            Vui lòng chọn hộ khẩu để xem danh sách nhân khẩu
+            Vui lòng chọn hộ khẩu hoặc nhập tìm kiếm để xem nhân khẩu
           </div>
-        ) : nhanKhauList.length === 0 ? (
+        ) : selectedHoKhauId !== null && nhanKhauList.length === 0 ? (
           <div className="p-8 text-center text-gray-500">
             Chưa có nhân khẩu nào trong hộ khẩu này. Hãy thêm nhân khẩu mới!
           </div>
@@ -2332,6 +2352,9 @@ export default function NhanKhau() {
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Họ tên
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    Số hộ khẩu
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
                     CCCD
@@ -2385,6 +2408,13 @@ export default function NhanKhau() {
                         </span>
                       )}
                     </td>
+
+                      {/* Số hộ khẩu */}
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {nk.soHoKhau ||
+                          hoKhauList.find((hk) => hk.id === nk.hoKhauId)?.soHoKhau ||
+                          "-"}
+                      </td>
 
                     {/* CCCD */}
                     <td className="px-4 py-3 text-sm text-gray-600">

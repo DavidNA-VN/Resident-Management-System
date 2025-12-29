@@ -40,6 +40,7 @@ router.get(
           nk."ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
           nk."diaChiThuongTruTruoc", nk."ngheNghiep", nk."noiLamViec", nk."ghiChu",
           nk."trangThai", nk."userId", nk."createdAt", nk."updatedAt",
+          hk."soHoKhau" AS "soHoKhau",
           -- residentStatus derived from trangThai
           CASE
             WHEN nk."trangThai" = 'tam_tru' THEN 'tam_tru'
@@ -60,7 +61,10 @@ router.get(
             SELECT COUNT(*) FROM phan_anh pa
             WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')
           ),0) AS "pendingReportsCount"
-         FROM nhan_khau nk WHERE nk."hoKhauId" = $1 ORDER BY nk."createdAt" DESC`,
+         FROM nhan_khau nk
+         LEFT JOIN ho_khau hk ON hk.id = nk."hoKhauId"
+         WHERE nk."hoKhauId" = $1
+         ORDER BY nk."createdAt" DESC`,
         [Number(hoKhauId)]
       );
 
@@ -81,6 +85,153 @@ router.get(
       }));
 
       return res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// Global search endpoint for nhan khau across TDP with optional filters
+router.get(
+  "/nhan-khau/search",
+  requireAuth,
+  requireRole(["to_truong", "to_pho", "can_bo"]),
+  async (req, res, next) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      const limit = Number(req.query.limit || 100);
+      const offset = Number(req.query.offset || 0);
+
+      const ageGroup = String(req.query.ageGroup || "").trim();
+      const gender = String(req.query.gender || "").trim();
+      const residenceStatus = String(req.query.residenceStatus || "").trim();
+      const movementStatus = String(req.query.movementStatus || "").trim();
+      const feedbackStatus = String(req.query.feedbackStatus || "").trim();
+
+      const hasFilters =
+        ageGroup || gender || residenceStatus || movementStatus || feedbackStatus;
+
+      if (!hasFilters && q.length < 2) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Cần nhập từ khóa (≥2 ký tự) hoặc chọn ít nhất một bộ lọc",
+          },
+        });
+      }
+
+      if (q && q.length < 2) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Từ khóa cần tối thiểu 2 ký tự",
+          },
+        });
+      }
+
+      const conditions: string[] = [];
+      const values: any[] = [];
+
+      if (q) {
+        values.push(`%${q}%`);
+        conditions.push(
+          `(nw."hoTen" ILIKE $${values.length} OR nw.cccd ILIKE $${values.length} OR nw."soHoKhau" ILIKE $${values.length})`
+        );
+      }
+
+      // Age group filter (derived from ngaySinh)
+      const ageRanges: Record<string, [number, number]> = {
+        MAM_NON: [3, 5],
+        CAP_1: [6, 10],
+        CAP_2: [11, 14],
+        CAP_3: [15, 17],
+        LAO_DONG: [18, 59],
+        NGHI_HUU: [60, 200],
+      };
+      if (ageGroup && ageRanges[ageGroup]) {
+        const [minAge, maxAge] = ageRanges[ageGroup];
+        values.push(minAge, maxAge);
+        conditions.push(`(nw."ageYears" BETWEEN $${values.length - 1} AND $${values.length})`);
+      }
+
+      if (gender) {
+        values.push(gender);
+        conditions.push(`nw."gioiTinh" = $${values.length}`);
+      }
+
+      if (residenceStatus) {
+        if (residenceStatus === "Thường trú") {
+          conditions.push(`nw."residentStatus" = 'thuong_tru'`);
+        } else if (residenceStatus === "Tạm trú") {
+          conditions.push(`nw."residentStatus" = 'tam_tru'`);
+        } else if (residenceStatus === "Tạm vắng") {
+          conditions.push(`nw."residentStatus" = 'tam_vang'`);
+        }
+      }
+
+      if (movementStatus) {
+        if (movementStatus === "moi_sinh") {
+          conditions.push(`nw."movementStatus" = 'moi_sinh'`);
+        } else if (movementStatus === "da_chuyen_di") {
+          conditions.push(`nw."movementStatus" = 'chuyen_di'`);
+        } else if (movementStatus === "da_qua_doi") {
+          conditions.push(`nw."movementStatus" = 'qua_doi'`);
+        } else if (movementStatus === "binh_thuong") {
+          conditions.push(`nw."movementStatus" = 'binh_thuong'`);
+        }
+      }
+
+      if (feedbackStatus === "has_new") {
+        conditions.push(`nw."pendingReportsCount" > 0`);
+      } else if (feedbackStatus === "no_new") {
+        conditions.push(`nw."pendingReportsCount" = 0`);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const result = await query(
+        `WITH nk_with AS (
+           SELECT
+             nk.id, nk."hoTen", nk."biDanh", nk.cccd,
+             nk."ngayCapCCCD"::text AS "ngayCapCCCD",
+             nk."noiCapCCCD",
+             nk."ngaySinh"::text AS "ngaySinh",
+             nk."gioiTinh", nk."noiSinh", nk."nguyenQuan", nk."danToc", nk."tonGiao", nk."quocTich",
+             nk."hoKhauId", nk."quanHe", nk."trangThai", nk."createdAt", nk."updatedAt",
+             hk."soHoKhau" AS "soHoKhau",
+             hk."diaChi" AS "diaChi",
+             CASE
+               WHEN nk."trangThai" = 'tam_tru' THEN 'tam_tru'
+               WHEN nk."trangThai" = 'tam_vang' THEN 'tam_vang'
+               ELSE 'thuong_tru'
+             END AS "residentStatus",
+             CASE
+               WHEN EXISTS (
+                 SELECT 1 FROM bien_dong bd WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh'
+               ) THEN 'moi_sinh'
+               WHEN nk."trangThai" = 'chuyen_di' THEN 'chuyen_di'
+               WHEN nk."trangThai" = 'khai_tu' THEN 'qua_doi'
+               ELSE 'binh_thuong'
+             END AS "movementStatus",
+             COALESCE((
+               SELECT COUNT(*) FROM phan_anh pa
+               WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')
+             ),0) AS "pendingReportsCount",
+             DATE_PART('year', age(current_date, nk."ngaySinh"))::int AS "ageYears"
+           FROM nhan_khau nk
+           LEFT JOIN ho_khau hk ON hk.id = nk."hoKhauId"
+         )
+         SELECT *
+         FROM nk_with nw
+         ${whereClause}
+         ORDER BY nw."createdAt" DESC
+         LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        [...values, limit, offset]
+      );
+
+      return res.json({ success: true, data: result.rows });
     } catch (err) {
       next(err);
     }
@@ -633,49 +784,3 @@ router.patch(
 );
 
 export default router;
-
-// Global search endpoint for nhan khau across TDP
-router.get(
-  "/nhan-khau/search",
-  requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
-  async (req, res, next) => {
-    try {
-      const q = String(req.query.q || "").trim();
-      const limit = Number(req.query.limit || 100);
-      const offset = Number(req.query.offset || 0);
-
-      if (!q || q.length < 2) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "Query q is required (min 2 chars)",
-          },
-        });
-      }
-      const searchParam = `%${q}%`;
-      const result = await query(
-        `SELECT
-           nk.id, nk."hoTen", nk."biDanh", nk.cccd,
-           nk."ngayCapCCCD"::text AS "ngayCapCCCD",
-           nk."noiCapCCCD",
-           nk."ngaySinh"::text AS "ngaySinh",
-           nk."gioiTinh", nk."noiSinh", nk."nguyenQuan", nk."danToc", nk."tonGiao", nk."quocTich",
-           nk."hoKhauId", nk."quanHe", nk."trangThai",
-           hk."soHoKhau" AS "soHoKhau",
-           hk."diaChi" AS "diaChi"
-         FROM nhan_khau nk
-         LEFT JOIN ho_khau hk ON hk.id = nk."hoKhauId"
-         WHERE (nk."hoTen" ILIKE $1 OR nk.cccd ILIKE $1)
-         ORDER BY nk."createdAt" DESC
-         LIMIT $2 OFFSET $3`,
-        [searchParam, limit, offset]
-      );
-
-      return res.json({ success: true, data: result.rows });
-    } catch (err) {
-      next(err);
-    }
-  }
-);

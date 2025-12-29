@@ -2149,12 +2149,186 @@ async function processSplitHouseholdApproval(
   reviewerId: number,
   targetHouseholdId?: number
 ) {
-  return {
-    acknowledged: true,
-    message:
-      "Yêu cầu tách hộ đã được ghi nhận. Vui lòng thực hiện thao tác tách hộ khẩu trên hệ thống quản trị.",
-    targetHouseholdId: targetHouseholdId || payload?.hoKhauId || null,
-  };
+  // Thực hiện tách hộ khẩu trực tiếp khi tổ trưởng duyệt
+  await query("BEGIN");
+
+  try {
+    // Khóa request để tránh duyệt trùng
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+
+    const originalHouseholdId = targetHouseholdId || payload?.hoKhauId;
+    if (!originalHouseholdId) {
+      throw {
+        code: "HOUSEHOLD_REQUIRED",
+        message: "Thiếu hộ khẩu gốc để tách",
+      };
+    }
+
+    const selectedIds: number[] = (payload?.selectedNhanKhauIds || [])
+      .map((n: any) => Number(n))
+      .filter((n: number) => Number.isInteger(n) && n > 0);
+
+    if (selectedIds.length === 0) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Vui lòng chọn ít nhất một nhân khẩu cần tách",
+      };
+    }
+
+    const newChuHoId = Number(payload?.newChuHoId);
+    if (!newChuHoId || !selectedIds.includes(newChuHoId)) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Chủ hộ mới phải nằm trong danh sách nhân khẩu được tách",
+      };
+    }
+
+    const newAddress = String(payload?.newAddress || "").trim();
+    if (!newAddress) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Địa chỉ hộ khẩu mới không được để trống",
+      };
+    }
+
+    const expectedDate = payload?.expectedDate || getCurrentDateString();
+
+    // Kiểm tra hộ khẩu gốc
+    const originalHousehold = await query(
+      `SELECT id, "chuHoId", "trangThai", "soHoKhau", "diaChi" FROM ho_khau WHERE id = $1`,
+      [originalHouseholdId]
+    );
+
+    if ((originalHousehold?.rowCount ?? 0) === 0) {
+      throw { code: "HOUSEHOLD_NOT_FOUND", message: "Hộ khẩu gốc không tồn tại" };
+    }
+
+    // Kiểm tra nhân khẩu thuộc hộ khẩu gốc
+    const selectedPeople = await query(
+      `SELECT id, "hoKhauId", "quanHe" FROM nhan_khau WHERE id = ANY($1::int[])`,
+      [selectedIds]
+    );
+
+    if ((selectedPeople?.rowCount ?? 0) !== selectedIds.length) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Danh sách nhân khẩu tách không hợp lệ",
+      };
+    }
+
+    const invalidMember = selectedPeople.rows.find((p) => p.hoKhauId !== originalHouseholdId);
+    if (invalidMember) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Tất cả nhân khẩu tách hộ phải thuộc cùng hộ khẩu gốc",
+      };
+    }
+
+    // Tạo hộ khẩu mới với số hộ khẩu tự sinh
+    const newHouseholdResult = await query(
+      `INSERT INTO ho_khau ("soHoKhau", "diaChi", "ngayCap", "trangThai", "ghiChu", "chuHoId")
+       VALUES (generate_ho_khau_code(), $1, $2, 'inactive', $3, NULL)
+       RETURNING id, "soHoKhau"`,
+      [newAddress, expectedDate, payload?.reason || null]
+    );
+
+    const newHouseholdId = newHouseholdResult.rows[0].id;
+    const newSoHoKhau = newHouseholdResult.rows[0].soHoKhau;
+
+    // Chuyển nhân khẩu sang hộ mới, set quanHe cho chủ hộ mới
+    await query(
+      `UPDATE nhan_khau
+       SET "hoKhauId" = $1,
+           "quanHe" = CASE
+             WHEN id = $2 THEN 'chu_ho'
+             WHEN "quanHe" = 'chu_ho' THEN 'khac'
+             ELSE "quanHe"
+           END,
+           "ngayDangKyThuongTru" = COALESCE("ngayDangKyThuongTru", $3),
+           "updatedAt" = CURRENT_TIMESTAMP
+       WHERE id = ANY($4::int[])`,
+      [newHouseholdId, newChuHoId, expectedDate, selectedIds]
+    );
+
+    // Kích hoạt hộ khẩu mới và gán chủ hộ
+    await query(
+      `UPDATE ho_khau
+       SET "chuHoId" = $1, "trangThai" = 'active', "ngayCap" = COALESCE("ngayCap", $2)
+       WHERE id = $3`,
+      [newChuHoId, expectedDate, newHouseholdId]
+    );
+
+    // Xử lý hộ khẩu gốc nếu chủ hộ cũ đã tách đi
+    const oldChuHoId = originalHousehold.rows[0].chuHoId;
+    const chuHoMoved = oldChuHoId && selectedIds.includes(Number(oldChuHoId));
+
+    if (chuHoMoved) {
+      const remaining = await query(
+        `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 ORDER BY id LIMIT 1`,
+        [originalHouseholdId]
+      );
+
+      if ((remaining?.rowCount ?? 0) > 0) {
+        const newHeadId = remaining.rows[0].id;
+        await query(`UPDATE nhan_khau SET "quanHe" = 'chu_ho' WHERE id = $1`, [newHeadId]);
+        await query(`UPDATE ho_khau SET "chuHoId" = $1 WHERE id = $2`, [newHeadId, originalHouseholdId]);
+      } else {
+        // Không còn thành viên, chuyển trạng thái hộ gốc về inactive
+        await query(
+          `UPDATE ho_khau SET "chuHoId" = NULL, "trangThai" = 'inactive' WHERE id = $1`,
+          [originalHouseholdId]
+        );
+      }
+    }
+
+    // Ghi lịch sử: hộ gốc đã tách các thành viên sang hộ mới
+    const movedMembers = await query(
+      `SELECT id, "hoTen" FROM nhan_khau WHERE id = ANY($1::int[])`,
+      [selectedIds]
+    );
+
+    await query(
+      `INSERT INTO lich_su_thay_doi (bang, "banGhiId", "hanhDong", truong, "noiDungCu", "noiDungMoi", "nguoiThucHien")
+       VALUES ('ho_khau', $1, 'update', 'tach_ho', NULL, $2, $3)`,
+      [
+        originalHouseholdId,
+        JSON.stringify({
+          movedToHouseholdId: newHouseholdId,
+          movedToSoHoKhau: newSoHoKhau,
+          members: movedMembers.rows,
+        }),
+        reviewerId,
+      ]
+    );
+
+    // Ghi lịch sử: hộ mới được tạo từ tách hộ
+    await query(
+      `INSERT INTO lich_su_thay_doi (bang, "banGhiId", "hanhDong", truong, "noiDungCu", "noiDungMoi", "nguoiThucHien")
+       VALUES ('ho_khau', $1, 'create', 'tach_ho', NULL, $2, $3)`,
+      [
+        newHouseholdId,
+        JSON.stringify({
+          sourceHouseholdId: originalHouseholdId,
+          sourceSoHoKhau: originalHousehold.rows[0].soHoKhau,
+          members: movedMembers.rows,
+        }),
+        reviewerId,
+      ]
+    );
+
+    await query("COMMIT");
+
+    return {
+      acknowledged: true,
+      message: "Tách hộ thành công",
+      newHouseholdId,
+      newSoHoKhau,
+      originalHouseholdId,
+    };
+  } catch (err) {
+    await query("ROLLBACK");
+    throw err;
+  }
 }
 
 async function processDeceasedApproval(

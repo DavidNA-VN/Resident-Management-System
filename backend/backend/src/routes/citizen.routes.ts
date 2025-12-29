@@ -174,7 +174,7 @@ router.get("/citizen/households", async (req, res, next) => {
   try {
     // Lấy danh sách hộ khẩu active (có thể filter theo điều kiện)
     const householdsResult = await query(
-      `SELECT id, "soHoKhau", diaChi, tinhThanh, quanHuyen, phuongXa, duongPho, soNha, trangThai
+      `SELECT id, "soHoKhau", "diaChi", "tinhThanh", "quanHuyen", "phuongXa", "duongPho", "soNha", trangThai
        FROM ho_khau
        WHERE trangThai = 'active'
        ORDER BY "soHoKhau" ASC`
@@ -235,7 +235,7 @@ router.get(
       if (personId) {
         // find the nhan_khau and its ho_khau
         const nhResult = await query(
-          `SELECT hk.id, hk."soHoKhau", hk.diaChi, hk.trangThai
+          `SELECT hk.id, hk."soHoKhau", hk."diaChi", hk.trangThai
          FROM nhan_khau nk
          JOIN ho_khau hk ON nk."hoKhauId" = hk.id
          WHERE nk.id = $1`,
@@ -248,7 +248,7 @@ router.get(
         // Try to match username as CCCD (remove spaces)
         const norm = username.replace(/\s+/g, "");
         const matchResult = await query(
-          `SELECT hk.id, hk."soHoKhau", hk.diaChi, hk.trangThai
+          `SELECT hk.id, hk."soHoKhau", hk."diaChi", hk.trangThai
          FROM nhan_khau nk
          JOIN ho_khau hk ON nk."hoKhauId" = hk.id
          WHERE REPLACE(COALESCE(nk.cccd,''),' ','') = $1

@@ -428,11 +428,31 @@ class ApiService {
   }
 
   // Global search for nhan khau across TDP (backend)
-  async searchNhanKhau(q: string, limit: number = 100, offset: number = 0) {
+  async searchNhanKhau(
+    q: string,
+    limit: number = 100,
+    offset: number = 0,
+    filters?: {
+      ageGroup?: string;
+      gender?: string;
+      residenceStatus?: string;
+      movementStatus?: string;
+      feedbackStatus?: string;
+    }
+  ) {
     const params = new URLSearchParams();
-    params.append("q", q);
+    if (q) params.append("q", q);
     params.append("limit", String(limit));
     params.append("offset", String(offset));
+    if (filters?.ageGroup) params.append("ageGroup", filters.ageGroup);
+    if (filters?.gender) params.append("gender", filters.gender);
+    if (filters?.residenceStatus)
+      params.append("residenceStatus", filters.residenceStatus);
+    if (filters?.movementStatus)
+      params.append("movementStatus", filters.movementStatus);
+    if (filters?.feedbackStatus)
+      params.append("feedbackStatus", filters.feedbackStatus);
+
     return this.request<{
       success: boolean;
       data: any[];
@@ -441,8 +461,18 @@ class ApiService {
   }
 
   // Alias for global search (kept for clearer intent)
-  async searchNhanKhauGlobal(q: string, limit: number = 10) {
-    return this.searchNhanKhau(q, limit, 0);
+  async searchNhanKhauGlobal(
+    q: string,
+    limit: number = 10,
+    filters?: {
+      ageGroup?: string;
+      gender?: string;
+      residenceStatus?: string;
+      movementStatus?: string;
+      feedbackStatus?: string;
+    }
+  ) {
+    return this.searchNhanKhau(q, limit, 0, filters);
   }
 
   async createRequest(data: {
