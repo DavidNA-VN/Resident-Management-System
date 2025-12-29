@@ -1,0 +1,18 @@
+
+--Cập nhật Database
+ALTER TABLE phan_anh ADD COLUMN IF NOT EXISTS "soLanPhanAnh" INTEGER DEFAULT 1;
+
+-- Tạo bảng để lưu danh sách người dân cùng tham gia 1 phản ánh
+CREATE TABLE IF NOT EXISTS phan_anh_nguoi (
+    id SERIAL PRIMARY KEY,
+    "phanAnhId" INTEGER REFERENCES phan_anh(id) ON DELETE CASCADE,
+    "nguoiPhanAnhId" INTEGER REFERENCES nguoi_dan(id), -- Giả sử bạn có bảng nguoi_dan
+    UNIQUE("phanAnhId", "nguoiPhanAnhId")
+);
+
+-- Lấy người gửi từ cột "nguoiPhanAnh" cũ để nạp vào bảng trung gian mới
+INSERT INTO phan_anh_nguoi ("phanAnhId", "nguoiPhanAnhId")
+SELECT id, "nguoiPhanAnh"::int 
+FROM phan_anh 
+WHERE "nguoiPhanAnh" IS NOT NULL
+ON CONFLICT DO NOTHING;

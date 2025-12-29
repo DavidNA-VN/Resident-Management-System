@@ -516,52 +516,6 @@ class ApiService {
     });
   }
 
-  // Lấy tất cả phản ánh (cho admin/tổ trưởng)
-  async getAllFeedbacks(params: { page?: number; limit?: number; status?: string; category?: string; userId?: number } = {}) {
-    const query = new URLSearchParams();
-    if (params.page) query.append("page", String(params.page));
-    if (params.limit) query.append("limit", String(params.limit));
-    if (params.status) query.append("status", params.status);
-    if (params.category) query.append("category", params.category);
-    if (params.userId) query.append("userId", String(params.userId));
-
-    return this.request<{
-      success: boolean;
-      data: any[];
-      total: number;
-      page: number;
-      limit: number
-    }>(
-      `/feedbacks?${query.toString()}`,
-      { method: "GET" }
-    );
-  }
-
-  // Gửi phản hồi cho phản ánh
-  async addResponse(id: number, responderUnit: string, content: string) {
-    return this.request<{ success: boolean; data: any }>(
-      `/feedbacks/${id}/response`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          responder_unit: responderUnit,
-          response_content: content,
-        }),
-      }
-    );
-  }
-
-  // Gộp các phản ánh
-  async merge(ids: number[]) {
-    return this.request<{ success: boolean; data: any }>(
-      "/feedbacks/merge",
-      {
-        method: "POST",
-        body: JSON.stringify({ ids }),
-      }
-    );
-  }
-
   // TODO: Thay bằng API thật khi backend có endpoint /citizen/my-household
   // GET /citizen/my-household - Lấy hộ khẩu và danh sách nhân khẩu của người dân
   async getMyHousehold() {
