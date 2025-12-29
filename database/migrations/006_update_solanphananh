@@ -1,0 +1,3 @@
+
+--Cập nhật Database
+ALTER TABLE phan_anh ADD COLUMN IF NOT EXISTS "soLanPhanAnh" INTEGER DEFAULT 1;

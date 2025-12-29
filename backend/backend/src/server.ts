@@ -12,7 +12,7 @@ import requestsRoutes from "./routes/requests.routes";
 // import nhankhauRoutes from "./routes/nhankhau.routes";
 // import citizenRoutes from "./routes/citizen.routes";
 // import requestsRoutes from "./routes/requests.routes";
-// import feedbackRoutes from "./routes/feedback.routes";
+import feedbackRoutes from "./routes/feedback.routes";
 import path from "path";
 import dotenv from "dotenv";
 
@@ -68,7 +68,7 @@ app.use("/api", requestsRoutes);
 // app.use("/api", nhankhauRoutes);
 // app.use("/api", citizenRoutes);
 // app.use("/api", requestsRoutes); // Commented out - causes errorMissingColumn
-// app.use("/api", feedbackRoutes);
+app.use("/api", feedbackRoutes);
 
 // Serve uploaded files statically
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));

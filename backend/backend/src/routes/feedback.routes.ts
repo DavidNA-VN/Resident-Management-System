@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { query } from "../db";
+import { feedbackController } from "../controllers/feedback.controller";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware";
 
 const router = Router();
@@ -135,5 +136,41 @@ router.get("/feedback/me", requireAuth, requireRole(["nguoi_dan"]), async (req, 
 });
 
 export default router;
+
+/**
+ * GET /feedbacks
+ * Lấy danh sách phản ánh/kiến nghị (phân trang, lọc trạng thái, phân loại)
+ */
+router.get("/feedbacks", requireAuth, feedbackController.list);
+
+/**
+ * GET /feedbacks/:id
+ * Xem chi tiết một phản ánh, kèm danh sách người phản ánh và phản hồi
+ */
+router.get("/feedbacks/:id", requireAuth, feedbackController.detail);
+
+/**
+ * PATCH /feedbacks/:id/status
+ * Cập nhật trạng thái phản ánh (chỉ ADMIN/TỔ TRƯỞNG)
+ */
+router.patch("/feedbacks/:id/status", requireAuth, requireRole(["admin", "to_truong"]), feedbackController.updateStatus);
+
+/**
+ * POST /feedbacks/:id/response
+ * Ghi nhận phản hồi từ cơ quan chức năng (chỉ ADMIN/TỔ TRƯỞNG)
+ */
+router.post("/feedbacks/:id/response", requireAuth, requireRole(["admin", "to_truong"]), feedbackController.addResponse);
+
+/**
+ * POST /feedbacks/merge
+ * Gộp các phản ánh trùng nhau (chỉ ADMIN/TỔ TRƯỞNG)
+ */
+router.post("/feedbacks/merge", requireAuth, requireRole(["admin", "to_truong"]), feedbackController.merge);
+
+/**
+ * POST /feedbacks/:id/notify
+ * Gửi thông báo cho người dân khi phản ánh có phản hồi hoặc thay đổi trạng thái
+ */
+router.post("/feedbacks/:id/notify", requireAuth, requireRole(["admin", "to_truong"]), feedbackController.notify);
 
 
