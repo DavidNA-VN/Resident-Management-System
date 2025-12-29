@@ -707,23 +707,158 @@ router.post(
         parsedPayload = reqRow.payload;
       }
 
-      const nhanKhauId = parsedPayload?.nhanKhauId;
       const tuNgay = parsedPayload?.tuNgay;
       const denNgay = parsedPayload?.denNgay || null;
       const lyDo = parsedPayload?.lyDo || parsedPayload?.reason || null;
+      const diaChi = parsedPayload?.diaChi || null;
 
-      if (!nhanKhauId || !tuNgay || !lyDo) {
+      // Support both: payload.nhanKhauId (existing) OR payload.person (create on approve)
+      let nhanKhauId = parsedPayload?.nhanKhauId
+        ? Number(parsedPayload.nhanKhauId)
+        : null;
+      const personPayload =
+        parsedPayload?.person || parsedPayload?.nhanKhau || null;
+
+      if (!tuNgay || !lyDo) {
         return res.status(400).json({
           success: false,
           error: {
             code: "VALIDATION_ERROR",
-            message: "Payload thiếu trường bắt buộc",
+            message: "Payload thiếu trường bắt buộc: tuNgay, lyDo",
+          },
+        });
+      }
+
+      if (!nhanKhauId && !personPayload) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Payload thiếu nhanKhauId hoặc thông tin person",
           },
         });
       }
 
       await query("BEGIN");
       try {
+        // If nhanKhauId missing, create/find person inside requester's household.
+        if (!nhanKhauId && personPayload) {
+          // Find requester's household via users.personId -> nhan_khau.hoKhauId
+          const requesterUserId =
+            reqRow.requesterUserId ||
+            reqRow.requesteruserid ||
+            reqRow.requesterUserID;
+          const requesterHousehold = await query(
+            `SELECT nk."hoKhauId" as "hoKhauId"
+             FROM users u
+             JOIN nhan_khau nk ON u."personId" = nk.id
+             WHERE u.id = $1
+             LIMIT 1`,
+            [requesterUserId]
+          );
+
+          if ((requesterHousehold?.rowCount ?? 0) === 0) {
+            await query("ROLLBACK");
+            return res.status(400).json({
+              success: false,
+              error: {
+                code: "VALIDATION_ERROR",
+                message:
+                  "Không xác định được hộ khẩu của người gửi (tài khoản chưa liên kết nhân khẩu)",
+              },
+            });
+          }
+
+          const hoKhauId = Number(requesterHousehold.rows[0].hoKhauId);
+
+          const hoTen = String(personPayload?.hoTen || "").trim();
+          const cccd = personPayload?.cccd
+            ? String(personPayload.cccd).trim()
+            : null;
+          const ngaySinh = personPayload?.ngaySinh || null;
+          const gioiTinh = personPayload?.gioiTinh || null;
+          const noiSinh = String(personPayload?.noiSinh || "").trim();
+          const quanHe = personPayload?.quanHe || "khac";
+
+          if (!hoTen || !ngaySinh || !gioiTinh || !noiSinh) {
+            await query("ROLLBACK");
+            return res.status(400).json({
+              success: false,
+              error: {
+                code: "VALIDATION_ERROR",
+                message:
+                  "Thiếu thông tin nhân khẩu bắt buộc: hoTen, ngaySinh, gioiTinh, noiSinh",
+              },
+            });
+          }
+
+          // If CCCD provided and exists, reuse only if same household
+          if (cccd) {
+            const existing = await query(
+              `SELECT id, "hoKhauId" FROM nhan_khau WHERE cccd = $1 LIMIT 1`,
+              [cccd]
+            );
+            if ((existing?.rowCount ?? 0) > 0) {
+              const existingRow = existing.rows[0];
+              if (Number(existingRow.hoKhauId) !== hoKhauId) {
+                await query("ROLLBACK");
+                return res.status(400).json({
+                  success: false,
+                  error: {
+                    code: "VALIDATION_ERROR",
+                    message: "Nhân khẩu với CCCD này đã tồn tại ở hộ khẩu khác",
+                  },
+                });
+              }
+              nhanKhauId = Number(existingRow.id);
+            }
+          }
+
+          if (!nhanKhauId) {
+            const insertPerson = await query(
+              `INSERT INTO nhan_khau (
+                "hoTen", cccd, "ngaySinh", "gioiTinh", "noiSinh",
+                "nguyenQuan", "danToc", "tonGiao", "quocTich",
+                "ngayDangKyThuongTru", "diaChiThuongTruTruoc",
+                "ngheNghiep", "noiLamViec", "ghiChu",
+                "hoKhauId", "quanHe", "trangThai"
+              ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, $7, $8, $9,
+                $10, $11,
+                $12, $13, $14,
+                $15, $16, $17
+              ) RETURNING id`,
+              [
+                hoTen,
+                cccd,
+                ngaySinh,
+                gioiTinh,
+                noiSinh,
+                personPayload?.nguyenQuan || null,
+                personPayload?.danToc || null,
+                personPayload?.tonGiao || null,
+                personPayload?.quocTich || "Việt Nam",
+                personPayload?.ngayDangKyThuongTru || null,
+                personPayload?.diaChiThuongTruTruoc || null,
+                personPayload?.ngheNghiep || null,
+                personPayload?.noiLamViec || null,
+                personPayload?.ghiChu || null,
+                hoKhauId,
+                quanHe,
+                "active",
+              ]
+            );
+            nhanKhauId = Number(insertPerson.rows[0].id);
+          }
+
+          // Attach created/linked person to request for easier listing later
+          await query(
+            `UPDATE requests SET "targetPersonId" = $1 WHERE id = $2`,
+            [nhanKhauId, requestId]
+          );
+        }
+
         // Check if tam_tru_vang record already exists (created by citizen)
         const existingTamTruVang = await query(
           `SELECT id FROM tam_tru_vang WHERE "nhanKhauId" = $1 AND "tuNgay" = $2 AND "trangThai" = 'cho_duyet'`,
@@ -766,6 +901,19 @@ router.post(
           newStatus,
           nhanKhauId,
         ]);
+
+        // If diaChi exists in payload and request is TAM_TRU/TAM_VANG, keep it on request payload for history
+        if (diaChi) {
+          try {
+            const nextPayload = { ...(parsedPayload || {}), diaChi };
+            await query(`UPDATE requests SET payload = $1 WHERE id = $2`, [
+              JSON.stringify(nextPayload),
+              requestId,
+            ]);
+          } catch (e) {
+            // ignore
+          }
+        }
 
         // Update request status
         await query(
