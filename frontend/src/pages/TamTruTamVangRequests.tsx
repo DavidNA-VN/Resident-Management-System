@@ -35,13 +35,57 @@ const parseYMD = (value: string | null | undefined) => {
 };
 
 const hasTemporaryStatus = (record: RequestRecord) => {
-  const raw =
-    (record.nhanKhau as any)?.residentStatus ||
-    (record.nhanKhau as any)?.trangThai ||
-    (record as any).trangThaiNhanKhau ||
-    "";
-  const normalized = String(raw).toLowerCase();
-  return normalized.includes("tam_tru") || normalized.includes("tam_vang");
+  const candidates = [
+    (record.nhanKhau as any)?.residentStatus,
+    (record.nhanKhau as any)?.trangThai,
+    (record.nhanKhau as any)?.status,
+    (record as any).trangThaiNhanKhau,
+    (record as any).statusNhanKhau,
+    record.loai,
+    (record as any).type,
+    record.status,
+    record.payload?.trangThai,
+    record.payload?.status,
+    record.payload?.loai,
+    record.payload?.type,
+  ];
+
+  return candidates.some((value) => {
+    if (!value) return false;
+    const normalized = String(value)
+      .toLowerCase()
+      .replace(/[^a-z0-9_ ]/g, " ");
+
+    return (
+      normalized.includes("tam_tru") ||
+      normalized.includes("tam tru") ||
+      normalized.includes("temporary_residence") ||
+      normalized.includes("tam_vang") ||
+      normalized.includes("tam vang") ||
+      normalized.includes("temporary_absence")
+    );
+  });
+};
+
+const isTamTruVangRecord = (record: any) => {
+  const candidates = [
+    record?.loai,
+    record?.type,
+    record?.payload?.loai,
+    record?.payload?.type,
+    record?.payload?.requestType,
+  ];
+
+  return candidates.some((value) => {
+    const normalized = normalizeType(value);
+    if (!normalized) return false;
+    return (
+      normalized.includes("tam_tru") ||
+      normalized.includes("tam_vang") ||
+      normalized.includes("temporary_residence") ||
+      normalized.includes("temporary_absence")
+    );
+  });
 };
 
 type RequestRecord = {
@@ -97,21 +141,116 @@ export default function TamTruTamVangRequests() {
   }, [success]);
 
   const mapRecord = (item: any): RequestRecord => {
-    const typeNormalized = normalizeType(item.loai || item.type);
+    const payload = item.payload || {};
+
+    const rawType =
+      item.loai ||
+      item.type ||
+      payload.loai ||
+      payload.type ||
+      payload.requestType ||
+      payload.residentStatus ||
+      payload.trangThai ||
+      item.status;
+
+    const typeNormalized = normalizeType(rawType);
     const loai =
-      typeNormalized.includes("vang") || typeNormalized.includes("absence")
+      typeNormalized.includes("vang") ||
+      typeNormalized.includes("absence") ||
+      typeNormalized.includes("temporary_absence")
         ? "tam_vang"
         : "tam_tru";
-    const payload = item.payload || {};
+
     const tuNgayRaw = payload.tuNgay || item.tuNgay || null;
     const denNgayRaw = payload.denNgay || item.denNgay || null;
-    const diaChi = payload.diaChi || item.diaChi || "";
-    const nguoiGui = item.nguoiGui || {
-      hoTen: item.requesterName || item.person?.hoTen || null,
-      cccd: item.person?.cccd || null,
-    };
-    const nhanKhau = item.nhanKhau || item.person || null;
-    const hoKhau = item.hoKhau || item.household || null;
+
+    const payloadPerson =
+      payload.nhanKhau ||
+      payload.person ||
+      (payload.personName || payload.hoTen
+        ? {
+            hoTen: payload.personName || payload.hoTen,
+            cccd:
+              payload.personCccd ||
+              payload.cccd ||
+              payload.cccdNguoiLienQuan ||
+              payload.cccdNguoiTamTruVang ||
+              payload.cccdNguoiDangKy ||
+              null,
+          }
+        : null);
+
+    const nhanKhau =
+      item.nhanKhau ||
+      item.person ||
+      payloadPerson ||
+      (item.personName
+        ? { hoTen: item.personName, cccd: item.personCccd }
+        : null);
+
+    const payloadHousehold =
+      payload.hoKhau ||
+      payload.household ||
+      (payload.soHoKhau ||
+      payload.householdCode ||
+      payload.maSoHoKhau ||
+      item.householdCode
+        ? {
+            soHoKhau:
+              payload.soHoKhau ||
+              payload.householdCode ||
+              payload.maSoHoKhau ||
+              item.householdCode,
+            diaChi:
+              payload.diaChi ||
+              payload.householdAddress ||
+              payload.diaChiCuTru ||
+              payload.diaChiThuongTru ||
+              item.householdAddress,
+            householdAddress: payload.householdAddress || item.householdAddress,
+          }
+        : null);
+
+    const hoKhau =
+      item.hoKhau ||
+      item.household ||
+      payloadHousehold ||
+      (item.householdCode || item.householdAddress
+        ? {
+            soHoKhau: item.householdCode,
+            diaChi: item.householdAddress,
+            householdAddress: item.householdAddress,
+          }
+        : null);
+
+    const nguoiGui = item.nguoiGui ||
+      payload.nguoiGui || {
+        hoTen:
+          item.requesterName ||
+          payload.requesterName ||
+          payload.hoTenNguoiGui ||
+          nhanKhau?.hoTen ||
+          null,
+        cccd:
+          item.person?.cccd ||
+          nhanKhau?.cccd ||
+          payload.personCccd ||
+          payload.cccd ||
+          payload.cccdNguoiGui ||
+          item.personCccd ||
+          null,
+      };
+
+    const diaChi =
+      payload.diaChi ||
+      item.diaChi ||
+      payload.householdAddress ||
+      payload.diaChiThuongTru ||
+      payload.diaChiCuTru ||
+      payload.diaChiDangKy ||
+      hoKhau?.diaChi ||
+      hoKhau?.householdAddress ||
+      "";
 
     return {
       ...item,
@@ -123,6 +262,7 @@ export default function TamTruTamVangRequests() {
       nguoiGui,
       nhanKhau,
       hoKhau,
+      payload,
     };
   };
 
@@ -133,19 +273,29 @@ export default function TamTruTamVangRequests() {
 
     const normalizeStatus = (s: string | undefined | null) => {
       const v = (s || "").toString().toLowerCase();
-      if (v.includes("da_duyet") || v.includes("approved") || v.includes("da duyet"))
+      if (
+        v.includes("da_duyet") ||
+        v.includes("approved") ||
+        v.includes("da duyet")
+      )
         return "approved";
       if (v.includes("cho") || v.includes("pending")) return "pending";
-      if (v.includes("tu_choi") || v.includes("rejected") || v.includes("tu choi"))
+      if (
+        v.includes("tu_choi") ||
+        v.includes("rejected") ||
+        v.includes("tu choi")
+      )
         return "rejected";
       return v;
     };
 
     return records
+      .filter(isTamTruVangRecord)
       .filter((r) => {
         if (statusFilter === "all") return true;
         return normalizeStatus(r.status) === statusFilter;
       })
+      .filter(hasTemporaryStatus)
       .filter((r) => !!r.hoKhau?.soHoKhau)
       .filter((r) => {
         if (!filterFrom && !filterTo) return true;
@@ -224,6 +374,22 @@ export default function TamTruTamVangRequests() {
     loadRequests();
   };
 
+  const resolveLoaiKey = (record: RequestRecord) => {
+    const normalized = normalizeType(
+      record.loai ||
+        record.type ||
+        record.payload?.loai ||
+        record.payload?.type ||
+        record.payload?.requestType
+    );
+
+    return normalized.includes("vang") ||
+      normalized.includes("absence") ||
+      normalized.includes("temporary_absence")
+      ? "tam_vang"
+      : "tam_tru";
+  };
+
   const renderStatus = (status: string) => {
     const key = (status || "").toLowerCase();
     return (
@@ -286,7 +452,9 @@ export default function TamTruTamVangRequests() {
             <select
               value={statusFilter}
               onChange={(e) =>
-                setStatusFilter(e.target.value as "all" | "pending" | "approved" | "rejected")
+                setStatusFilter(
+                  e.target.value as "all" | "pending" | "approved" | "rejected"
+                )
               }
               className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             >
@@ -402,15 +570,26 @@ export default function TamTruTamVangRequests() {
                       #{request.id}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-900">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          request.loai === "tam_tru"
-                            ? "bg-blue-100 text-blue-700"
-                            : "bg-orange-100 text-orange-700"
-                        }`}
-                      >
-                        {loaiLabels[request.loai] || request.loai}
-                      </span>
+                      {(() => {
+                        const loaiKey = resolveLoaiKey(request);
+                        const label =
+                          loaiLabels[loaiKey as keyof typeof loaiLabels] ||
+                          request.loai ||
+                          request.type ||
+                          "-";
+
+                        return (
+                          <span
+                            className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                              loaiKey === "tam_tru"
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-orange-100 text-orange-700"
+                            }`}
+                          >
+                            {label}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600">
                       <div className="font-medium">
@@ -423,12 +602,40 @@ export default function TamTruTamVangRequests() {
                       )}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600">
-                      <div>{request.hoKhau?.soHoKhau || "-"}</div>
-                      {request.nhanKhau?.hoTen && (
-                        <div className="text-gray-500 text-xs">
-                          {request.nhanKhau.hoTen}
-                        </div>
-                      )}
+                      {(() => {
+                        const relatedName =
+                          request.nhanKhau?.hoTen ||
+                          request.payload?.personName ||
+                          request.payload?.hoTen ||
+                          request.payload?.nguoiLienQuan?.hoTen ||
+                          request.payload?.nguoiTamTruVang?.hoTen ||
+                          request.nguoiGui?.hoTen ||
+                          "-";
+
+                        const relatedCccd =
+                          request.nhanKhau?.cccd ||
+                          request.payload?.personCccd ||
+                          request.payload?.cccd ||
+                          request.payload?.nguoiLienQuan?.cccd ||
+                          request.payload?.nguoiTamTruVang?.cccd ||
+                          "";
+
+                        return (
+                          <>
+                            <div className="font-medium">{relatedName}</div>
+                            {relatedCccd && (
+                              <div className="text-gray-500 text-xs">
+                                {relatedCccd}
+                              </div>
+                            )}
+                            {request.hoKhau?.soHoKhau && (
+                              <div className="text-gray-500 text-xs">
+                                Sổ: {request.hoKhau.soHoKhau}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600">
                       <div>
@@ -445,8 +652,21 @@ export default function TamTruTamVangRequests() {
                       </div>
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600 max-w-xs">
-                      <div className="truncate" title={request.diaChi || ""}>
-                        {request.diaChi || "-"}
+                      <div
+                        className="truncate"
+                        title={
+                          request.hoKhau?.diaChi ||
+                          request.payload?.diaChi ||
+                          request.diaChi ||
+                          request.hoKhau?.householdAddress ||
+                          ""
+                        }
+                      >
+                        {request.hoKhau?.diaChi ||
+                          request.payload?.diaChi ||
+                          request.diaChi ||
+                          request.hoKhau?.householdAddress ||
+                          "-"}
                       </div>
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600">

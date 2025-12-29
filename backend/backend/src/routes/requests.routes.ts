@@ -464,6 +464,11 @@ router.get(
         idx++;
       }
 
+      // Chỉ lấy những nhân khẩu đang có trạng thái tạm trú/tạm vắng
+      whereClause += ` AND nk."trangThai" IN ($${idx}, $${idx + 1})`;
+      params.push("tam_tru", "tam_vang");
+      idx += 2;
+
       const pageNum = Math.max(1, parseInt(String(page)));
       const perPage = Math.max(1, Math.min(200, parseInt(String(limit))));
       const offset = (pageNum - 1) * perPage;
@@ -519,6 +524,12 @@ router.get(
         } OR hk."diaChi" ILIKE $${tamTruVangFilters.length + 1})`;
         tamTruVangFilters.push(kw);
       }
+
+      // Chỉ lấy những nhân khẩu đang có trạng thái tạm trú/tạm vắng
+      ttvWhere += ` AND nk."trangThai" IN ($${tamTruVangFilters.length + 1}, $${
+        tamTruVangFilters.length + 2
+      })`;
+      tamTruVangFilters.push("tam_tru", "tam_vang");
 
       const ttvQuery = `
         SELECT
@@ -2154,7 +2165,9 @@ async function processSplitHouseholdApproval(
 
   try {
     // Khóa request để tránh duyệt trùng
-    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [
+      requestId,
+    ]);
 
     const originalHouseholdId = targetHouseholdId || payload?.hoKhauId;
     if (!originalHouseholdId) {
@@ -2200,7 +2213,10 @@ async function processSplitHouseholdApproval(
     );
 
     if ((originalHousehold?.rowCount ?? 0) === 0) {
-      throw { code: "HOUSEHOLD_NOT_FOUND", message: "Hộ khẩu gốc không tồn tại" };
+      throw {
+        code: "HOUSEHOLD_NOT_FOUND",
+        message: "Hộ khẩu gốc không tồn tại",
+      };
     }
 
     // Kiểm tra nhân khẩu thuộc hộ khẩu gốc
@@ -2216,7 +2232,9 @@ async function processSplitHouseholdApproval(
       };
     }
 
-    const invalidMember = selectedPeople.rows.find((p) => p.hoKhauId !== originalHouseholdId);
+    const invalidMember = selectedPeople.rows.find(
+      (p) => p.hoKhauId !== originalHouseholdId
+    );
     if (invalidMember) {
       throw {
         code: "VALIDATION_ERROR",
@@ -2270,8 +2288,13 @@ async function processSplitHouseholdApproval(
 
       if ((remaining?.rowCount ?? 0) > 0) {
         const newHeadId = remaining.rows[0].id;
-        await query(`UPDATE nhan_khau SET "quanHe" = 'chu_ho' WHERE id = $1`, [newHeadId]);
-        await query(`UPDATE ho_khau SET "chuHoId" = $1 WHERE id = $2`, [newHeadId, originalHouseholdId]);
+        await query(`UPDATE nhan_khau SET "quanHe" = 'chu_ho' WHERE id = $1`, [
+          newHeadId,
+        ]);
+        await query(`UPDATE ho_khau SET "chuHoId" = $1 WHERE id = $2`, [
+          newHeadId,
+          originalHouseholdId,
+        ]);
       } else {
         // Không còn thành viên, chuyển trạng thái hộ gốc về inactive
         await query(
