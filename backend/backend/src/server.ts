@@ -15,7 +15,7 @@ import requestsRoutes from "./routes/requests.routes";
 // import feedbackRoutes from "./routes/feedback.routes";
 import path from "path";
 import dotenv from "dotenv";
-
+import thongKeRoutes from './routes/thongke.routes';
 // Load environment variables
 dotenv.config();
 
@@ -51,7 +51,7 @@ async function findAvailablePort(startPort: number): Promise<number> {
   }
   throw new Error(`No available ports found starting from ${startPort}`);
 }
-
+app.use('/api/thongke', thongKeRoutes);
 // Mount API routes under /api to standardize frontend/backend prefix
 // Mount only auth routes for now to enable login
 app.use("/api", authRoutes);
