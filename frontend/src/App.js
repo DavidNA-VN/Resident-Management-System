@@ -13,7 +13,7 @@ import PhanAnh from "./pages/citizen/PhanAnh";
 import Requests from "./pages/Requests";
 import TamTruTamVangRequests from "./pages/TamTruTamVangRequests";
 import Feedbacks from "./pages/Feedbacks";
-
+import ThongKe from "./pages/ThongKe";
 function App() {
     return (_jsx(BrowserRouter, { 
         children: _jsxs(Routes, { 
@@ -25,7 +25,13 @@ function App() {
                 _jsx(Route, { path: "/requests", element: _jsx(ProtectedRoute, { allowedRoles: ["to_truong", "to_pho", "can_bo"], children: _jsx(Layout, { children: _jsx(Requests, {}) }) }) }), 
                 _jsx(Route, { path: "/bien-dong", element: _jsx(ProtectedRoute, { allowedRoles: ["to_truong", "to_pho", "can_bo"], children: _jsx(Layout, { children: _jsxs("div", { className: "rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm", children: [_jsx("h1", { className: "text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent", children: "Bi\u1EBFn \u0111\u1ED9ng Nh\u00E2n kh\u1EA9u" }), _jsx("p", { className: "mt-2 text-gray-600", children: "Trang n\u00E0y \u0111ang \u0111\u01B0\u1EE3c ph\u00E1t tri\u1EC3n..." })] }) }) }) }), 
                 _jsx(Route, { path: "/tam-tru-vang", element: _jsx(ProtectedRoute, { allowedRoles: ["to_truong", "to_pho", "can_bo"], children: _jsx(Layout, { children: _jsx(TamTruTamVangRequests, {}) }) }) }), 
-                
+                _jsx(Route, { 
+                    path: "/thong-ke", 
+                    element: _jsx(ProtectedRoute, { 
+                        allowedRoles: ["to_truong", "to_pho", "can_bo"], 
+                        children: _jsx(Layout, { children: _jsx(ThongKe, {}) }) 
+                    }) 
+                }), 
                 /* ĐÃ SỬA ĐOẠN NÀY */
                 _jsx(Route, { path: "/phan-anh", element: _jsx(ProtectedRoute, { allowedRoles: ["to_truong", "to_pho", "can_bo"], children: _jsx(Layout, { children: _jsx(Feedbacks, {}) }) }) }), 
                 

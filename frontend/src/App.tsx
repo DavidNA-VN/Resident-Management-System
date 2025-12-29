@@ -12,7 +12,7 @@ import PhanAnh from "./pages/citizen/PhanAnh";
 import Requests from "./pages/Requests";
 import TamTruTamVangRequests from "./pages/TamTruTamVangRequests";
 import Feedbacks from "./pages/Feedbacks";
-
+import ThongKe from "./pages/ThongKe";
 function App() {
   return (
     <BrowserRouter>
@@ -94,20 +94,15 @@ function App() {
           }
         />
         <Route
-          path="/thong-ke"
-          element={
-            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
-              <Layout>
-                <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
-                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                    Thống kê
-                  </h1>
-                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
-                </div>
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
+  path="/thong-ke"
+  element={
+    <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
+      <Layout>
+        <ThongKe /> 
+      </Layout>
+    </ProtectedRoute>
+  }
+/>
         <Route
           path="/bao-cao"
           element={
