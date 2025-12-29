@@ -2,6 +2,37 @@ import { Request, Response, NextFunction } from "express";
 import { query } from "../db";
 
 export const feedbackController = {
+  async create(req: Request, res: Response, next: NextFunction) {
+    const { tieuDe, noiDung, loai } = req.body;
+    const userId = req.user?.id; 
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Bạn cần đăng nhập để gửi phản ánh" });
+    }
+
+    await query('BEGIN');
+    try {
+      const result = await query(
+        `INSERT INTO phan_anh ("tieuDe", "noiDung", "loai", "nguoiPhanAnh", "trangThai", "ngayTao", "soLanPhanAnh") 
+         VALUES ($1, $2, $3, $4, 'cho_xu_ly', NOW(), 1) RETURNING id`,
+        [tieuDe, noiDung, loai, userId]
+      );
+      
+      const newFeedbackId = result.rows[0].id;
+
+      await query(
+        `INSERT INTO phan_anh_nguoi ("phanAnhId", "nguoiPhanAnhId") VALUES ($1, $2)`,
+        [newFeedbackId, userId]
+      );
+
+      await query('COMMIT');
+      res.json({ success: true, data: { id: newFeedbackId } });
+    } catch (err) {
+      await query('ROLLBACK');
+      next(err);
+    }
+  },
+
   async list(req: Request, res: Response, next: NextFunction) {
     try {
       const { page = 1, limit = 10, status, category } = req.query;
@@ -16,30 +47,46 @@ export const feedbackController = {
       let idx = 1;
 
       if (status) {
-        where.push(`"trangThai" = $${idx++}`);
+        where.push(`pa."trangThai" = $${idx++}`);
         params.push(status);
       }
       if (category) {
-        where.push(`loai = $${idx++}`);
+        where.push(`pa.loai = $${idx++}`);
         params.push(category);
       }
       if (userId) {
-        where.push(`"nguoiPhanAnh" = $${idx++}`);
+        where.push(`pa."nguoiPhanAnh" = $${idx++}`);
         params.push(userId);
+      }
+
+      // SỬA TẠI ĐÂY: Nếu không phải người dân xem đơn của mình, ẩn các đơn đã bị gộp
+      // Điều này giúp danh sách của Tổ trưởng gọn gàng, chỉ hiện đơn "Chính"
+      if (req.user?.role !== "nguoi_dan") {
+        where.push(`(pa."ketQuaXuLy" IS NULL OR pa."ketQuaXuLy" NOT LIKE 'Đã gộp vào phản ánh ID: %')`);
       }
 
       const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
       const offset = (Number(page) - 1) * Number(limit);
 
-      params.push(Number(limit), offset);
-      const limitParamIdx = idx;
-      const offsetParamIdx = idx + 1;
-      const sql = `SELECT * FROM phan_anh ${whereClause} ORDER BY "ngayTao" DESC LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`;
-      const result = await query(sql, params);
+      const sql = `
+        SELECT pa.*, 
+          (
+            SELECT COALESCE(JSON_AGG(u."fullName"), '[]'::json) 
+            FROM phan_anh_nguoi pan 
+            JOIN users u ON pan."nguoiPhanAnhId" = u.id 
+            WHERE pan."phanAnhId" = pa.id
+          ) as "danhSachNguoi"
+        FROM phan_anh pa 
+        ${whereClause} 
+        ORDER BY pa."ngayTao" DESC 
+        LIMIT $${idx++} OFFSET $${idx++}
+      `;
 
-      const countParams = params.slice(0, params.length - 2);
-      const countSql = `SELECT COUNT(*) FROM phan_anh ${whereClause}`;
-      const countResult = await query(countSql, countParams);
+      const finalParams = [...params, Number(limit), offset];
+      const result = await query(sql, finalParams);
+
+      const countSql = `SELECT COUNT(*) FROM phan_anh pa ${whereClause}`;
+      const countResult = await query(countSql, params);
 
       res.json({
         success: true,
@@ -64,13 +111,11 @@ export const feedbackController = {
         [id]
       );
 
-      // ĐÃ SỬA: Bỏ truy vấn vào bảng phan_anh_phan_hoi không tồn tại
       res.json({
         success: true,
         data: {
           ...feedback.rows[0],
           reporters: reporters.rows,
-          // Phản hồi bây giờ nằm trong feedback.rows[0].ketQuaXuLy
         },
       });
     } catch (err) {
@@ -89,92 +134,89 @@ export const feedbackController = {
     }
   },
 
-  // ĐÃ SỬA: Hàm addResponse để khớp với Database (sử dụng cột ketQuaXuLy và trạng thái da_xu_ly)
   async addResponse(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
       const { responder_unit, response_content } = req.body;
-
-      // Lưu phản hồi trực tiếp vào bảng phan_anh
       const formattedContent = `[${responder_unit}]: ${response_content}`;
 
-      const sql = `
+      await query('BEGIN');
+      
+      // 1. Cập nhật phản hồi cho bản ghi chính
+      const result = await query(`
         UPDATE phan_anh 
         SET "ketQuaXuLy" = $1, 
             "trangThai" = 'da_xu_ly', 
             "ngayXuLy" = NOW(), 
             "updatedAt" = NOW() 
         WHERE id = $2
-      `;
-
-      const result = await query(sql, [formattedContent, id]);
+      `, [formattedContent, id]);
 
       if (result.rowCount === 0) {
+        await query('ROLLBACK');
         return res.status(404).json({ success: false, message: "Không tìm thấy phản ánh" });
       }
 
-      res.json({ success: true });
-    } catch (err) {
-      next(err);
-    }
-  },
-
- // feedback.controller.ts
-
-async merge(req: Request, res: Response, next: NextFunction) {
-  try {
-    const { ids } = req.body; 
-    const feedbackIds = ids;
-
-    if (!Array.isArray(feedbackIds) || feedbackIds.length < 2) {
-      return res.status(400).json({ success: false, error: { message: "Cần ít nhất 2 phản ánh để gộp" } });
-    }
-    
-    const mainId = feedbackIds[0];
-    const otherIds = feedbackIds.slice(1);
-
-    await query('BEGIN');
-    try {
-      // 1. Ghi nhận những người phản ánh vào bảng trung gian
-      // Lấy tất cả người dân từ các bản ghi bị gộp chuyển sang bản ghi chính
-      await query(
-        `INSERT INTO phan_anh_nguoi ("phanAnhId", "nguoiPhanAnhId")
-         SELECT $1, "nguoiPhanAnhId" FROM phan_anh_nguoi 
-         WHERE "phanAnhId" = ANY($2::int[]) 
-         ON CONFLICT ("phanAnhId", "nguoiPhanAnhId") DO NOTHING`,
-        [mainId, feedbackIds]
-      );
-
-      // 2. Ghi nhận số lần phản ánh vào cột vừa tạo
-      // Cộng số lượng phản ánh bị gộp vào bản ghi chính
-      await query(
-        `UPDATE phan_anh 
-         SET "soLanPhanAnh" = COALESCE("soLanPhanAnh", 1) + $1,
-             "updatedAt" = NOW()
-         WHERE id = $2`, 
-        [otherIds.length, mainId]
-      );
-
-      // 3. Chuyển trạng thái các bản ghi phụ thành 'tu_choi' để đóng chúng lại
-      await query(
-        `UPDATE phan_anh 
-         SET "trangThai" = 'tu_choi', 
-             "ketQuaXuLy" = 'Đã gộp vào phản ánh ID: ' || $1,
-             "updatedAt" = NOW() 
-         WHERE id = ANY($2::int[]) AND id != $1`, 
-        [mainId, feedbackIds]
-      );
+      // 2. Cập nhật tất cả các bản ghi phụ đã được gộp vào bản ghi này
+      await query(`
+        UPDATE phan_anh 
+        SET "ketQuaXuLy" = $1, 
+            "trangThai" = 'da_xu_ly', 
+            "ngayXuLy" = NOW(), 
+            "updatedAt" = NOW() 
+        WHERE "ketQuaXuLy" LIKE 'Đã gộp vào phản ánh ID: ' || $2
+      `, [formattedContent, id]);
 
       await query('COMMIT');
       res.json({ success: true });
     } catch (err) {
       await query('ROLLBACK');
-      throw err;
+      next(err);
     }
-  } catch (err) {
-    next(err);
-  }
-},
+  },
+
+  async merge(req: Request, res: Response) {
+    const { ids } = req.body; 
+    const mainId = ids[0];
+    const otherIds = ids.slice(1);
+
+    await query('BEGIN');
+    try {
+        await query(`
+            INSERT INTO phan_anh_nguoi ("phanAnhId", "nguoiPhanAnhId")
+            SELECT $1, "nguoiPhanAnhId" FROM phan_anh_nguoi 
+            WHERE "phanAnhId" = ANY($2::int[])
+            ON CONFLICT DO NOTHING
+        `, [mainId, ids]);
+
+        const countRes = await query(
+            'SELECT COUNT(*) FROM phan_anh_nguoi WHERE "phanAnhId" = $1', 
+            [mainId]
+        );
+        const totalCount = parseInt(countRes.rows[0].count);
+
+        await query(
+            'UPDATE phan_anh SET "soLanPhanAnh" = $1, "updatedAt" = NOW() WHERE id = $2', 
+            [totalCount, mainId]
+        );
+
+        // Chuyển sang 'dang_xu_ly' để người dân không thấy bị từ chối
+        await query(`
+            UPDATE phan_anh 
+            SET "trangThai" = 'dang_xu_ly', 
+                "ketQuaXuLy" = 'Đã gộp vào phản ánh ID: ' || $1,
+                "updatedAt" = NOW() 
+            WHERE id = ANY($2::int[]) AND id != $1
+        `, [mainId, otherIds]);
+
+        await query('COMMIT');
+        res.json({ success: true });
+    } catch (err) {
+        await query('ROLLBACK');
+        console.error("Lỗi Merge Feedback:", err);
+        res.status(500).json({ success: false, message: "Lỗi hệ thống khi gộp" });
+    }
+  },
 
   async notify(req: Request, res: Response, next: NextFunction) {
     try {

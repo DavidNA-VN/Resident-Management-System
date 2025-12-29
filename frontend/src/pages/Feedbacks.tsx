@@ -5,7 +5,6 @@ export default function Feedbacks() {
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   
-  // States cho tính năng Gộp và Phản hồi
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [showResponseModal, setShowResponseModal] = useState(false);
   const [currentFb, setCurrentFb] = useState<any>(null);
@@ -42,11 +41,11 @@ export default function Feedbacks() {
       alert("Vui lòng chọn ít nhất 2 phản ánh để gộp!");
       return;
     }
-    if (window.confirm(`Bạn có chắc muốn gộp ${selectedIds.length} phản ánh này? Ghi nhận số lượt và danh sách người dân phản ánh.`)) {
+    if (window.confirm(`Bạn có chắc muốn gộp ${selectedIds.length} phản ánh này? Các phản ánh phụ sẽ được ẩn khỏi danh sách quản lý và xử lý chung với phản ánh chính.`)) {
       try {
         const res = await apiService.merge(selectedIds);
         if (res.success) {
-          alert("Gộp thành công!");
+          alert("Gộp thành công! Hệ thống đã tối ưu danh sách hiển thị.");
           await loadFeedbacks(); 
         } else {
           alert("Gộp thất bại: " + (res.message || "Lỗi hệ thống"));
@@ -72,7 +71,7 @@ export default function Feedbacks() {
       const res = await apiService.addResponse(currentFb.id, responderUnit, responseContent);
       
       if (res && res.success) {
-        alert("Đã gửi phản hồi thành công!");
+        alert("Đã gửi phản hồi thành công! Tất cả các phản ánh liên quan đã được cập nhật trạng thái.");
         setShowResponseModal(false);
         setResponseContent("");
         await loadFeedbacks(); 
@@ -95,13 +94,16 @@ export default function Feedbacks() {
     return styles[status] || "bg-gray-100 text-gray-700 border-gray-200";
   };
 
-  // Hàm chuyển đổi nhãn trạng thái sang Tiếng Việt
-  const getStatusLabel = (status: string) => {
+  // Cập nhật nhãn trạng thái để Tổ trưởng dễ phân biệt các bài Đã gộp
+  const getStatusLabel = (status: string, ketQuaXuLy?: string) => {
+    if (status === "dang_xu_ly" && ketQuaXuLy?.includes("Đã gộp vào")) {
+        return "Đã gộp";
+    }
     const labels: Record<string, string> = {
       cho_xu_ly: "Chờ xử lý",
       dang_xu_ly: "Đang xử lý",
       da_xu_ly: "Đã xử lý",
-      tu_choi: "Từ chối/Đã gộp",
+      tu_choi: "Từ chối",
     };
     return labels[status] || status;
   };
@@ -146,7 +148,8 @@ export default function Feedbacks() {
       ) : (
         <div className="grid gap-5">
           {feedbacks
-            .filter(fb => fb.trangThai !== 'tu_choi') 
+            /* SỬA TẠI ĐÂY: Ẩn hoàn toàn các phản ánh phụ đã bị gộp khỏi danh sách quản lý của Tổ trưởng */
+            .filter(fb => !fb.ketQuaXuLy || !fb.ketQuaXuLy.includes("Đã gộp vào phản ánh ID:")) 
             .map((fb) => (
               <div 
                 key={fb.id} 
@@ -173,12 +176,30 @@ export default function Feedbacks() {
                         </span>
                       )}
                       <span className={`px-3 py-1 rounded-lg text-[11px] font-bold border ${getStatusBadge(fb.trangThai)}`}>
-                        {getStatusLabel(fb.trangThai)}
+                        {getStatusLabel(fb.trangThai, fb.ketQuaXuLy)}
                       </span>
                     </div>
                   </div>
                   
-                  <p className="text-gray-600 mb-5 leading-relaxed">{fb.noiDung}</p>
+                  <p className="text-gray-600 mb-4 leading-relaxed">{fb.noiDung}</p>
+
+                  <div className="flex flex-wrap gap-2 mb-5 items-center">
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Người gửi:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {fb.danhSachNguoi && fb.danhSachNguoi.length > 0 ? (
+                        fb.danhSachNguoi.map((name: string, index: number) => (
+                          <span 
+                            key={index} 
+                            className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100 shadow-sm"
+                          >
+                            👤 {name}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">Chưa xác định danh tính</span>
+                      )}
+                    </div>
+                  </div>
 
                   {fb.ketQuaXuLy && (
                     <div className="mb-6 p-4 bg-emerald-50 border-l-4 border-emerald-400 rounded-r-xl shadow-inner text-sm">
@@ -198,6 +219,7 @@ export default function Feedbacks() {
                         📅 {new Date(fb.ngayTao).toLocaleDateString('vi-VN')}
                       </span>
                     </div>
+                    
                     <button 
                       onClick={() => {
                         setCurrentFb(fb);
