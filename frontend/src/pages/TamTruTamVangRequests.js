@@ -50,17 +50,20 @@ export default function TamTruTamVangRequests() {
         try {
             const params = {};
             if (loaiFilter !== "all")
-                params.loai = loaiFilter;
+                params.type = loaiFilter === "tam_vang" ? "TAM_VANG" : "TAM_TRU";
             if (statusFilter !== "all")
                 params.status = statusFilter;
             if (searchQuery.trim())
-                params.q = searchQuery.trim();
+                params.keyword = searchQuery.trim();
             if (fromDate)
-                params.from = fromDate;
+                params.fromDate = fromDate;
             if (toDate)
-                params.to = toDate;
-            const response = await apiService.getTamTruVangList(params);
-            if (response.success) {
+                params.toDate = toDate;
+            params.page = 1;
+            params.limit = 200;
+
+            const response = await apiService.getTamTruVangRequests(params);
+            if (response?.success) {
                 setRequests(response.data || []);
             }
         }
@@ -86,5 +89,5 @@ export default function TamTruTamVangRequests() {
                                                     year: "numeric",
                                                     month: "2-digit",
                                                     day: "2-digit",
-                                                }) }), _jsx("td", { className: "py-3 px-4", children: _jsx("span", { className: `px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${statusColors[request.status]}`, children: statusLabels[request.status] }) }), _jsx("td", { className: "py-3 px-4 text-right", children: _jsx("button", { onClick: () => handleViewDetail(request.id), className: "rounded-lg bg-blue-50 text-blue-600 px-3 py-1.5 text-xs font-medium hover:bg-blue-100 transition-colors", children: "Xem" }) })] }, request.id))) })] }) }))] }), selectedRequestId && (_jsx(TamTruVangDetailModal, { requestId: selectedRequestId, isOpen: true, onClose: handleCloseModal, onRefresh: handleRefresh }))] }));
+                                                }) }), _jsx("td", { className: "py-3 px-4", children: _jsx("span", { className: `px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${statusColors[(request.status || "").toString().toLowerCase()] || "bg-gray-100 text-gray-700"}`, children: statusLabels[(request.status || "").toString().toLowerCase()] || request.status }) }), _jsx("td", { className: "py-3 px-4 text-right", children: _jsx("button", { onClick: () => handleViewDetail(request.id), className: "rounded-lg bg-blue-50 text-blue-600 px-3 py-1.5 text-xs font-medium hover:bg-blue-100 transition-colors", children: "Xem" }) })] }, request.id))) })] }) }))] }), selectedRequestId && (_jsx(TamTruVangDetailModal, { requestId: selectedRequestId, isOpen: true, onClose: handleCloseModal, onRefresh: handleRefresh }))] }));
 }

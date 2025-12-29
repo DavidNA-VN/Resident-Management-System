@@ -67,6 +67,9 @@ export default function TamTruTamVangRequests() {
   const [loaiFilter, setLoaiFilter] = useState<"all" | "tam_tru" | "tam_vang">(
     "all"
   );
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "pending" | "approved" | "rejected"
+  >("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -84,7 +87,7 @@ export default function TamTruTamVangRequests() {
   useEffect(() => {
     loadRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaiFilter, searchQuery, fromDate, toDate]);
+  }, [loaiFilter, searchQuery, fromDate, toDate, statusFilter]);
 
   useEffect(() => {
     if (success) {
@@ -128,8 +131,21 @@ export default function TamTruTamVangRequests() {
     const filterFrom = parseYMD(fromDate || undefined);
     const filterTo = parseYMD(toDate || undefined);
 
+    const normalizeStatus = (s: string | undefined | null) => {
+      const v = (s || "").toString().toLowerCase();
+      if (v.includes("da_duyet") || v.includes("approved") || v.includes("da duyet"))
+        return "approved";
+      if (v.includes("cho") || v.includes("pending")) return "pending";
+      if (v.includes("tu_choi") || v.includes("rejected") || v.includes("tu choi"))
+        return "rejected";
+      return v;
+    };
+
     return records
-      .filter((r) => r.status === "approved" || r.status === "da_duyet")
+      .filter((r) => {
+        if (statusFilter === "all") return true;
+        return normalizeStatus(r.status) === statusFilter;
+      })
       .filter((r) => !!r.hoKhau?.soHoKhau)
       .filter((r) => {
         if (!filterFrom && !filterTo) return true;
@@ -166,7 +182,7 @@ export default function TamTruTamVangRequests() {
         keyword: searchQuery.trim() || undefined,
         fromDate: fromDate || undefined,
         toDate: toDate || undefined,
-        status: "approved",
+        status: statusFilter !== "all" ? statusFilter : undefined,
         page: 1,
         limit: 200,
       } as const;
@@ -261,6 +277,23 @@ export default function TamTruTamVangRequests() {
               <option value="all">Tất cả</option>
               <option value="tam_tru">Tạm trú</option>
               <option value="tam_vang">Tạm vắng</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Trạng thái
+            </label>
+            <select
+              value={statusFilter}
+              onChange={(e) =>
+                setStatusFilter(e.target.value as "all" | "pending" | "approved" | "rejected")
+              }
+              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="all">Tất cả</option>
+              <option value="pending">Chờ duyệt</option>
+              <option value="approved">Đã duyệt</option>
+              <option value="rejected">Từ chối</option>
             </select>
           </div>
           <div>
