@@ -16,6 +16,7 @@ export type AuthUser = {
   username: string;
   role: RoleCode;
   task: TaskCode | null;
+  personId?: number | null;
 };
 
 declare global {
@@ -33,7 +34,11 @@ declare global {
  * - Load user (role + task) from DB
  * - Attach req.user
  */
-export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
+export const requireAuth = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
     const auth = req.headers.authorization;
     if (!auth || !auth.startsWith("Bearer ")) {
@@ -73,7 +78,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     }
 
     const r = await query(
-      `SELECT id, username, role, task
+      `SELECT id, username, role, task, "personId"
        FROM users
        WHERE id = $1 AND "isActive" = true`,
       [userId]
@@ -94,6 +99,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       username: String(u.username),
       role: u.role as RoleCode,
       task: (u.task ?? null) as TaskCode | null,
+      personId: u.personId ? Number(u.personId) : null,
     };
 
     return next();

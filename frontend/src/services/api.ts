@@ -1,6 +1,7 @@
 // Frontend will read from VITE_API_URL env variable
 // If backend runs on different port, update frontend/.env: VITE_API_URL=http://localhost:<PORT>/api
-export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
+export const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:3000/api";
 
 export interface LoginRequest {
   username: string;
@@ -29,6 +30,7 @@ export interface AuthResponse {
         personId: number;
         hoTen: string;
         householdId: number;
+        isHeadOfHousehold?: boolean;
       };
       message?: string; // Thông báo khi chưa linked
     };
@@ -64,6 +66,7 @@ export interface UserInfo {
     personId: number;
     hoTen: string;
     householdId: number;
+    isHeadOfHousehold?: boolean;
   };
   message?: string; // Thông báo khi chưa linked
 }
@@ -133,7 +136,12 @@ class ApiService {
     // debug response
     try {
       // eslint-disable-next-line no-console
-      console.log("[api.request] <-", { status: response.status, data, rawTextSnippet: typeof rawText === "string" ? rawText.slice(0, 200) : null });
+      console.log("[api.request] <-", {
+        status: response.status,
+        data,
+        rawTextSnippet:
+          typeof rawText === "string" ? rawText.slice(0, 200) : null,
+      });
     } catch (e) {
       // ignore
     }
@@ -182,9 +190,12 @@ class ApiService {
   }
 
   async getCitizenHouseholds() {
-    return this.request<{ success: boolean; data: any[] }>("/citizen/households", {
-      method: "GET",
-    });
+    return this.request<{ success: boolean; data: any[] }>(
+      "/citizen/households",
+      {
+        method: "GET",
+      }
+    );
   }
 
   /**
@@ -192,10 +203,11 @@ class ApiService {
    * Lấy hộ khẩu liên quan đến tài khoản người dân hiện tại (dựa trên personId hoặc username=cccd)
    */
   async getMyHouseholds() {
-    return this.request<{ success: boolean; data: any[]; error?: { code: string; message: string } }>(
-      "/citizen/me/households",
-      { method: "GET" }
-    );
+    return this.request<{
+      success: boolean;
+      data: any[];
+      error?: { code: string; message: string };
+    }>("/citizen/me/households", { method: "GET" });
   }
 
   logout() {
@@ -228,9 +240,12 @@ class ApiService {
   }
 
   async getHoKhauHistory(id: number) {
-    return this.request<{ success: boolean; data: any[] }>(`/ho-khau/${id}/history`, {
-      method: "GET",
-    });
+    return this.request<{ success: boolean; data: any[] }>(
+      `/ho-khau/${id}/history`,
+      {
+        method: "GET",
+      }
+    );
   }
 
   async createHoKhau(data: {
@@ -265,7 +280,11 @@ class ApiService {
       ghiChu?: string;
     }
   ) {
-    return this.request<{ success: boolean; data: any; error?: { code: string; message: string } }>(`/ho-khau/${id}`, {
+    return this.request<{
+      success: boolean;
+      data: any;
+      error?: { code: string; message: string };
+    }>(`/ho-khau/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
@@ -308,6 +327,13 @@ class ApiService {
     const cacheBust = `_=${Date.now()}`;
     return this.request<{ success: boolean; data: any }>(
       `/nhan-khau/${id}?${cacheBust}`,
+      { method: "GET" }
+    );
+  }
+
+  async getNhanKhauHistory(id: number) {
+    return this.request<{ success: boolean; data: any[] }>(
+      `/nhan-khau/${id}/history`,
       { method: "GET" }
     );
   }
@@ -402,23 +428,59 @@ class ApiService {
   }
 
   // Global search for nhan khau across TDP (backend)
-  async searchNhanKhau(q: string, limit: number = 100, offset: number = 0) {
+  async searchNhanKhau(
+    q: string,
+    limit: number = 100,
+    offset: number = 0,
+    filters?: {
+      ageGroup?: string;
+      gender?: string;
+      residenceStatus?: string;
+      movementStatus?: string;
+      feedbackStatus?: string;
+    }
+  ) {
     const params = new URLSearchParams();
-    params.append("q", q);
+    if (q) params.append("q", q);
     params.append("limit", String(limit));
     params.append("offset", String(offset));
-    return this.request<{ success: boolean; data: any[]; error?: { code: string; message: string } }>(
-      `/nhan-khau/search?${params.toString()}`,
-      { method: "GET" }
-    );
+    if (filters?.ageGroup) params.append("ageGroup", filters.ageGroup);
+    if (filters?.gender) params.append("gender", filters.gender);
+    if (filters?.residenceStatus)
+      params.append("residenceStatus", filters.residenceStatus);
+    if (filters?.movementStatus)
+      params.append("movementStatus", filters.movementStatus);
+    if (filters?.feedbackStatus)
+      params.append("feedbackStatus", filters.feedbackStatus);
+
+    return this.request<{
+      success: boolean;
+      data: any[];
+      error?: { code: string; message: string };
+    }>(`/nhan-khau/search?${params.toString()}`, { method: "GET" });
   }
 
   // Alias for global search (kept for clearer intent)
-  async searchNhanKhauGlobal(q: string, limit: number = 10) {
-    return this.searchNhanKhau(q, limit, 0);
+  async searchNhanKhauGlobal(
+    q: string,
+    limit: number = 10,
+    filters?: {
+      ageGroup?: string;
+      gender?: string;
+      residenceStatus?: string;
+      movementStatus?: string;
+      feedbackStatus?: string;
+    }
+  ) {
+    return this.searchNhanKhau(q, limit, 0, filters);
   }
 
-  async createRequest(data: { type: string; payload: any }) {
+  async createRequest(data: {
+    type: string;
+    payload: any;
+    targetHouseholdId?: number;
+    targetPersonId?: number;
+  }) {
     return this.request<{ success: boolean; data: any }>("/requests", {
       method: "POST",
       body: JSON.stringify(data),
@@ -541,7 +603,8 @@ class ApiService {
       return await this.request<{ success: boolean; data: any }>("/requests", {
         method: "POST",
         body: JSON.stringify({
-          type: "TACH_HO_KHAU",
+          type: "SPLIT_HOUSEHOLD",
+          targetHouseholdId: data.hoKhauId,
           payload: data,
         }),
       });
@@ -563,7 +626,15 @@ class ApiService {
 
   // TODO: Thay bằng API thật khi backend sẵn sàng
   // GET /requests?type=&status= - Lấy danh sách yêu cầu (cho tổ trưởng/cán bộ)
-  async getRequestsList(filters?: { type?: string; status?: string; keyword?: string; fromDate?: string; toDate?: string; page?: number; limit?: number }) {
+  async getRequestsList(filters?: {
+    type?: string;
+    status?: string;
+    keyword?: string;
+    fromDate?: string;
+    toDate?: string;
+    page?: number;
+    limit?: number;
+  }) {
     const params = new URLSearchParams();
     if (filters?.type) params.append("type", filters.type);
     if (filters?.status) params.append("status", filters.status);
@@ -615,10 +686,20 @@ class ApiService {
   }
 
   // Tam Tru Tam Vang APIs
-  async getTamTruVangRequests(filters?: { type?: string; status?: string; keyword?: string; fromDate?: string; toDate?: string; page?: number; limit?: number }) {
+  async getTamTruVangRequests(filters?: {
+    type?: string;
+    status?: string;
+    keyword?: string;
+    fromDate?: string;
+    toDate?: string;
+    page?: number;
+    limit?: number;
+  }) {
     const params = new URLSearchParams();
-    if (filters?.type && filters.type !== "all") params.append("type", filters.type);
-    if (filters?.status && filters.status !== "all") params.append("status", filters.status);
+    if (filters?.type && filters.type !== "all")
+      params.append("type", filters.type);
+    if (filters?.status && filters.status !== "all")
+      params.append("status", filters.status);
     if (filters?.keyword) params.append("keyword", filters.keyword);
     if (filters?.fromDate) params.append("fromDate", filters.fromDate);
     if (filters?.toDate) params.append("toDate", filters.toDate);
@@ -635,7 +716,7 @@ class ApiService {
         limit: number;
         total: number;
         totalPages: number;
-      }
+      };
     }>(url, {
       method: "GET",
     });

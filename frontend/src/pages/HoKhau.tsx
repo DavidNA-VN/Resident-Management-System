@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiService } from "../services/api";
 import { formatDateForInput, formatFromYMD } from "../utils/date";
@@ -75,6 +75,25 @@ export default function HoKhau() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyList, setHistoryList] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Nhãn tiếng Việt cho các trường lịch sử hộ khẩu
+  const historyFieldLabels = useMemo(
+    () => ({
+      soHoKhau: "Sổ hộ khẩu",
+      diaChi: "Địa chỉ",
+      diaChiDayDu: "Địa chỉ đầy đủ",
+      tinhThanh: "Tỉnh/Thành",
+      quanHuyen: "Quận/Huyện",
+      phuongXa: "Phường/Xã",
+      duongPho: "Đường/Phố",
+      soNha: "Số nhà",
+      ngayCap: "Ngày cấp",
+      trangThai: "Trạng thái",
+      chuHoId: "Chủ hộ",
+      ghiChu: "Ghi chú",
+    }),
+    []
+  );
 
   const emptyMemberFull: NhanKhauFull = {
     id: 0,
@@ -225,13 +244,22 @@ export default function HoKhau() {
       <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/50 p-4">
         <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-lg">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold">Lịch sử thay đổi – Hộ khẩu</h3>
-            <button onClick={() => setShowHistoryModal(false)} className="text-gray-500">Đóng</button>
+            <h3 className="text-lg font-semibold">
+              Lịch sử thay đổi – Hộ khẩu
+            </h3>
+            <button
+              onClick={() => setShowHistoryModal(false)}
+              className="text-gray-500"
+            >
+              Đóng
+            </button>
           </div>
           {historyLoading ? (
             <div className="text-center text-gray-500">Đang tải lịch sử...</div>
           ) : historyList.length === 0 ? (
-            <div className="text-center text-gray-500">Không có lịch sử nào.</div>
+            <div className="text-center text-gray-500">
+              Không có lịch sử nào.
+            </div>
           ) : (
             <div className="overflow-y-auto max-h-80">
               <table className="w-full text-sm">
@@ -239,7 +267,7 @@ export default function HoKhau() {
                   <tr>
                     <th className="px-3 py-2 text-left">Thời gian</th>
                     <th className="px-3 py-2 text-left">Hành động</th>
-                    <th className="px-3 py-2 text-left">Trường</th>
+                    <th className="px-3 py-2 text-left">Nội dung thay đổi</th>
                     <th className="px-3 py-2 text-left">Nội dung cũ → mới</th>
                     <th className="px-3 py-2 text-left">Người thực hiện</th>
                   </tr>
@@ -247,15 +275,21 @@ export default function HoKhau() {
                 <tbody className="divide-y divide-gray-200">
                   {historyList.map((h) => (
                     <tr key={h.id}>
-                      <td className="px-3 py-2">{new Date(h.createdAt).toLocaleString("vi-VN")}</td>
+                      <td className="px-3 py-2">
+                        {new Date(h.createdAt).toLocaleString("vi-VN")}
+                      </td>
                       <td className="px-3 py-2">{h.hanhDong}</td>
-                      <td className="px-3 py-2">{h.truong}</td>
+                      <td className="px-3 py-2">
+                        {historyFieldLabels[h.truong] || h.truong}
+                      </td>
                       <td className="px-3 py-2">
                         <div className="text-xs text-gray-600">
                           {h.noiDungCu || "-"} → {h.noiDungMoi || "-"}
                         </div>
                       </td>
-                      <td className="px-3 py-2">{h.nguoiThucHienName || "-"}</td>
+                      <td className="px-3 py-2">
+                        {h.nguoiThucHienName || "-"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -302,7 +336,6 @@ export default function HoKhau() {
       setMemberViewLoading(false);
     }
   };
-
 
   const openEditHousehold = async (hoKhau: HoKhau) => {
     setEditingHoKhau(hoKhau);
@@ -379,7 +412,8 @@ export default function HoKhau() {
         await loadHoKhauList();
       } else {
         // Hiển thị error message từ server nếu có
-        const errorMessage = response.error?.message || "Không thể cập nhật hộ khẩu";
+        const errorMessage =
+          response.error?.message || "Không thể cập nhật hộ khẩu";
         setError(errorMessage);
       }
     } catch (err: any) {
@@ -525,7 +559,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                       required
                     />
                   </label>
@@ -541,7 +577,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -556,7 +594,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
@@ -574,7 +614,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -589,7 +631,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -604,7 +648,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
@@ -622,7 +668,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -636,7 +684,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     >
                       <option value="">Chọn giới tính</option>
                       <option value="nam">Nam</option>
@@ -656,7 +706,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
@@ -674,7 +726,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -689,7 +743,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -704,7 +760,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
@@ -722,7 +780,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -736,7 +796,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     >
                       <option value="">Chọn quan hệ</option>
                       {Object.keys(quanHeLabel).map((key) => (
@@ -760,7 +822,9 @@ export default function HoKhau() {
                     }
                     disabled={memberViewReadOnly}
                     rows={2}
-                    className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                    className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                      memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                    } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                   />
                 </label>
 
@@ -777,7 +841,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                   <label className="block text-sm font-medium text-gray-700">
@@ -792,7 +858,9 @@ export default function HoKhau() {
                         })
                       }
                       disabled={memberViewReadOnly}
-                      className={`mt-1 w-full rounded-lg border border-gray-300 ${memberViewReadOnly ? 'bg-gray-50' : 'bg-white'} px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
+                      className={`mt-1 w-full rounded-lg border border-gray-300 ${
+                        memberViewReadOnly ? "bg-gray-50" : "bg-white"
+                      } px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20`}
                     />
                   </label>
                 </div>
@@ -1050,10 +1118,7 @@ export default function HoKhau() {
                   </div>
                 )}
                 {viewingHoKhau.ngayCap && (
-                  <div>
-                    Ngày cấp:{" "}
-                    {formatFromYMD(viewingHoKhau.ngayCap)}
-                  </div>
+                  <div>Ngày cấp: {formatFromYMD(viewingHoKhau.ngayCap)}</div>
                 )}
                 {viewingHoKhau.ghiChu && (
                   <div>Ghi chú: {viewingHoKhau.ghiChu}</div>
@@ -1138,9 +1203,7 @@ export default function HoKhau() {
                             : "-"}
                         </td>
                         <td className="px-4 py-2 text-gray-700">
-                          {nk.ngaySinh
-                            ? formatFromYMD(nk.ngaySinh)
-                            : "-"}
+                          {nk.ngaySinh ? formatFromYMD(nk.ngaySinh) : "-"}
                         </td>
                         <td className="px-4 py-2 text-gray-700">
                           {(nk.ghiChu ?? "").trim() || "Còn sống"}
@@ -1156,7 +1219,9 @@ export default function HoKhau() {
                             </button>
                             {canEditMember && (
                               <button
-                                onClick={() => navigateToNhanKhauPage(viewingHoKhau!.id)}
+                                onClick={() =>
+                                  navigateToNhanKhauPage(viewingHoKhau!.id)
+                                }
                                 className="rounded-md border border-orange-200 px-3 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:text-orange-600"
                                 title="Chỉnh sửa nhân khẩu ở trang Nhân khẩu"
                               >

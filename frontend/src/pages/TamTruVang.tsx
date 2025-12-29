@@ -8,6 +8,9 @@ interface RequestItem {
   type: string;
   status: string;
   createdAt: string;
+  tuNgay?: string;
+  denNgay?: string;
+  lyDo?: string;
   nguoiGui?: { hoTen?: string; username?: string; cccd?: string };
   hoKhauLienQuan?: { id?: number; soHoKhau?: string; diaChi?: string };
   payload?: any;
@@ -61,15 +64,42 @@ const formatDateRange = (tuNgay?: string, denNgay?: string): string => {
   return "-";
 };
 
+const normalizeType = (type?: string) => (type || "").toUpperCase();
+const normalizeStatus = (status?: string) => (status || "").toUpperCase();
+
+const isTamTruVangType = (type?: string) => {
+  const normalized = normalizeType(type);
+  return [
+    "TAM_TRU",
+    "TEMPORARY_RESIDENCE",
+    "TAM_VANG",
+    "TEMPORARY_ABSENCE",
+  ].includes(normalized);
+};
+
+const parseYMDToDate = (value?: string) => {
+  if (!value) return null;
+  const parts = value.split("-");
+  if (parts.length !== 3) return null;
+  const [y, m, d] = parts.map((p) => parseInt(p, 10));
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d, 12, 0, 0);
+};
+
+const getDateFromPayload = (item: RequestItem, key: "tuNgay" | "denNgay") => {
+  return item?.payload?.[key] || (item as any)[key] || null;
+};
+
 export default function TamTruVang() {
   const navigate = useNavigate();
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [filteredRequests, setFilteredRequests] = useState<RequestItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
+  const [selectedRequestId, setSelectedRequestId] = useState<number | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     type: "success" | "error";
@@ -81,18 +111,6 @@ export default function TamTruVang() {
     { value: "all", label: "Tất cả" },
     { value: "TAM_TRU", label: "Tạm trú" },
     { value: "TAM_VANG", label: "Tạm vắng" },
-    { value: "TACH_HO_KHAU", label: "Tách hộ khẩu" },
-    { value: "SUA_NHAN_KHAU", label: "Sửa nhân khẩu" },
-    { value: "XOA_NHAN_KHAU", label: "Xoá nhân khẩu" },
-    { value: "ADD_PERSON", label: "Thêm nhân khẩu" },
-    { value: "ADD_NEWBORN", label: "Thêm con sơ sinh" },
-  ];
-
-  const filterStatuses = [
-    { value: "all", label: "Tất cả" },
-    { value: "pending", label: "Chờ duyệt" },
-    { value: "approved", label: "Đã duyệt" },
-    { value: "rejected", label: "Từ chối" },
   ];
 
   // Check user role
@@ -120,9 +138,71 @@ export default function TamTruVang() {
 
   useEffect(() => {
     loadRequests();
-  }, [typeFilter, statusFilter, searchQuery]);
+  }, [typeFilter, searchQuery]);
 
-  const showToast = (message: string, type: "success" | "error" = "success") => {
+  const applyFilters = (data: RequestItem[]) => {
+    const now = new Date();
+    const activeRecords = data
+      .filter((item) => isTamTruVangType(item.type))
+      .map((item) => {
+        const tuNgay = getDateFromPayload(item, "tuNgay");
+        const denNgay = getDateFromPayload(item, "denNgay");
+        return {
+          ...item,
+          payload: { ...(item.payload || {}), tuNgay, denNgay },
+        } as RequestItem;
+      })
+      .filter((item) => {
+        if (normalizeStatus(item.status) !== "APPROVED") return false;
+        const startDate = parseYMDToDate(getDateFromPayload(item, "tuNgay"));
+        const endDate = parseYMDToDate(getDateFromPayload(item, "denNgay"));
+        if (startDate && startDate > now) return false;
+        if (endDate && endDate < now) return false;
+        return true;
+      });
+
+    const byType =
+      typeFilter === "all"
+        ? activeRecords
+        : activeRecords.filter((item) => {
+            const normalized = normalizeType(item.type);
+            if (typeFilter === "TAM_TRU") {
+              return (
+                normalized === "TAM_TRU" || normalized === "TEMPORARY_RESIDENCE"
+              );
+            }
+            if (typeFilter === "TAM_VANG") {
+              return (
+                normalized === "TAM_VANG" || normalized === "TEMPORARY_ABSENCE"
+              );
+            }
+            return normalized === normalizeType(typeFilter);
+          });
+
+    if (!searchQuery.trim()) return byType;
+    const keyword = searchQuery.trim().toLowerCase();
+    return byType.filter((item) => {
+      const name = item.nguoiGui?.hoTen?.toLowerCase() || "";
+      const username = item.nguoiGui?.username?.toLowerCase() || "";
+      const cccd = item.nguoiGui?.cccd?.toLowerCase() || "";
+      const soHoKhau =
+        item.hoKhauLienQuan?.soHoKhau?.toLowerCase() ||
+        item.payload?.soHoKhau?.toLowerCase() ||
+        "";
+      const address =
+        item.hoKhauLienQuan?.diaChi?.toLowerCase() ||
+        item.payload?.diaChi?.toLowerCase() ||
+        "";
+      return [name, username, cccd, soHoKhau, address].some((field) =>
+        field.includes(keyword)
+      );
+    });
+  };
+
+  const showToast = (
+    message: string,
+    type: "success" | "error" = "success"
+  ) => {
     setToast({ type, message });
   };
 
@@ -133,37 +213,43 @@ export default function TamTruVang() {
       // Debug logs to verify endpoint call and token
       try {
         // eslint-disable-next-line no-console
-        console.log("[TamTruVang] calling getTamTruVangRequests with", {
-          type: typeFilter !== "all" ? typeFilter : undefined,
-          status: statusFilter !== "all" ? statusFilter : undefined,
-          keyword: searchQuery || undefined,
-        }, "tokenExists=", !!localStorage.getItem("accessToken"));
+        console.log(
+          "[TamTruVang] calling getTamTruVangRequests with",
+          {
+            type: typeFilter !== "all" ? typeFilter : undefined,
+            keyword: searchQuery || undefined,
+          },
+          "tokenExists=",
+          !!localStorage.getItem("accessToken")
+        );
       } catch (e) {}
       const paramsForLog: any = {
         type: typeFilter !== "all" ? typeFilter : undefined,
-        status: statusFilter !== "all" ? statusFilter : undefined,
         keyword: searchQuery || undefined,
         page: 1,
         limit: 200,
       };
       const qp = new URLSearchParams();
       if (paramsForLog.type) qp.append("type", paramsForLog.type);
-      if (paramsForLog.status) qp.append("status", paramsForLog.status);
       if (paramsForLog.keyword) qp.append("keyword", paramsForLog.keyword);
       qp.append("page", String(paramsForLog.page));
       qp.append("limit", String(paramsForLog.limit));
       const base = API_BASE_URL.replace(/\/$/, "");
-      const fullUrl = `${base}/tam-tru-vang/requests${qp.toString() ? `?${qp.toString()}` : ""}`;
+      const fullUrl = `${base}/tam-tru-vang/requests${
+        qp.toString() ? `?${qp.toString()}` : ""
+      }`;
       setLastRequestLog(`GET ${fullUrl} -> pending -> `);
 
       const response = await apiService.getTamTruVangRequests(paramsForLog);
       if (response && response.success) {
         const data = response.data || [];
         setRequests(data);
-        setFilteredRequests(data);
+        setFilteredRequests(applyFilters(data));
       } else {
-        setError("Không thể tải danh sách yêu cầu");
-        setLastRequestLog(`GET ${fullUrl} -> 200 -> ${JSON.stringify(response).slice(0,1000)}`);
+        setError("Không thể tải danh sách tạm trú/tạm vắng");
+        setLastRequestLog(
+          `GET ${fullUrl} -> 200 -> ${JSON.stringify(response).slice(0, 1000)}`
+        );
       }
     } catch (err: any) {
       // log detailed error
@@ -174,45 +260,59 @@ export default function TamTruVang() {
 
       // Show precise error messages based on status
       const status = err?.status || err?.error?.status;
-      const backendMessage = err?.error?.message || err?.message || err?.rawText || null;
+      const backendMessage =
+        err?.error?.message || err?.message || err?.rawText || null;
       // update UI log
       try {
         const paramsForLog2: any = {
           type: typeFilter !== "all" ? typeFilter : undefined,
-          status: statusFilter !== "all" ? statusFilter : undefined,
           keyword: searchQuery || undefined,
           page: 1,
           limit: 200,
         };
         const qp2 = new URLSearchParams();
         if (paramsForLog2.type) qp2.append("type", paramsForLog2.type);
-        if (paramsForLog2.status) qp2.append("status", paramsForLog2.status);
         if (paramsForLog2.keyword) qp2.append("keyword", paramsForLog2.keyword);
         qp2.append("page", String(paramsForLog2.page));
         qp2.append("limit", String(paramsForLog2.limit));
         const base2 = API_BASE_URL.replace(/\/$/, "");
-        const fullUrl = `${base2}/tam-tru-vang/requests${qp2.toString() ? `?${qp2.toString()}` : ""}`;
-        const bodySnippet = backendMessage || JSON.stringify(err)?.slice(0,1000) || "";
-        setLastRequestLog(`GET ${fullUrl} -> ${status || "ERR"} -> ${bodySnippet}`);
+        const fullUrl = `${base2}/tam-tru-vang/requests${
+          qp2.toString() ? `?${qp2.toString()}` : ""
+        }`;
+        const bodySnippet =
+          backendMessage || JSON.stringify(err)?.slice(0, 1000) || "";
+        setLastRequestLog(
+          `GET ${fullUrl} -> ${status || "ERR"} -> ${bodySnippet}`
+        );
       } catch (e) {
         // ignore
       }
 
       if (status === 401) {
-        setError("Bạn chưa đăng nhập hoặc phiên đã hết hạn. Vui lòng đăng nhập lại.");
+        setError(
+          "Bạn chưa đăng nhập hoặc phiên đã hết hạn. Vui lòng đăng nhập lại."
+        );
         showToast("Bạn chưa đăng nhập hoặc phiên đã hết hạn", "error");
       } else if (status === 403) {
         setError("Bạn không có quyền xem danh sách này.");
         showToast("Không đủ quyền", "error");
       } else if (status === 404) {
-        setError(`Không tìm thấy API (404). Vui lòng kiểm tra cấu hình backend. ${backendMessage || ""}`);
+        setError(
+          `Không tìm thấy API (404). Vui lòng kiểm tra cấu hình backend. ${
+            backendMessage || ""
+          }`
+        );
         showToast("Lỗi: API không tìm thấy (404)", "error");
       } else if (status === 500) {
         setError(`Lỗi máy chủ: ${backendMessage || "Internal Server Error"}`);
         showToast("Lỗi máy chủ", "error");
       } else {
-        setError(backendMessage ? `${status || ""} - ${backendMessage}` : "Không thể tải danh sách yêu cầu");
-        showToast("Không thể tải danh sách yêu cầu", "error");
+        setError(
+          backendMessage
+            ? `${status || ""} - ${backendMessage}`
+            : "Không thể tải danh sách tạm trú/tạm vắng"
+        );
+        showToast("Không thể tải danh sách tạm trú/tạm vắng", "error");
       }
     } finally {
       setIsLoading(false);
@@ -288,10 +388,10 @@ export default function TamTruVang() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-            Duyệt đơn Tạm trú / Tạm vắng
+            Danh sách tạm trú / tạm vắng đang hiệu lực
           </h1>
           <p className="mt-1 text-gray-600">
-            Tiếp nhận và xử lý yêu cầu từ người dân
+            Chỉ hiển thị các hồ sơ đã duyệt và còn trong thời gian hiệu lực
           </p>
         </div>
         <button
@@ -304,7 +404,7 @@ export default function TamTruVang() {
 
       {/* Filter Card */}
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Loại yêu cầu
@@ -321,22 +421,6 @@ export default function TamTruVang() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Trạng thái
-            </label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              {filterStatuses.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Tìm kiếm
@@ -345,7 +429,7 @@ export default function TamTruVang() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Mã yêu cầu, tên người gửi hoặc CCCD..."
+              placeholder="Họ tên, CCCD, sổ hộ khẩu hoặc địa chỉ..."
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
@@ -361,7 +445,8 @@ export default function TamTruVang() {
       {/* Last request debug log (visible) */}
       {lastRequestLog && (
         <div className="mt-3 rounded-md bg-gray-50 border border-gray-200 p-3 text-gray-700 text-sm">
-          <strong>Last request:</strong>&nbsp;<span className="font-mono">{lastRequestLog}</span>
+          <strong>Last request:</strong>&nbsp;
+          <span className="font-mono">{lastRequestLog}</span>
         </div>
       )}
 
@@ -369,20 +454,24 @@ export default function TamTruVang() {
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 p-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            Danh sách yêu cầu ({filteredRequests.length})
+            Đang tạm trú / tạm vắng ({filteredRequests.length})
           </h2>
         </div>
 
         {isLoading ? (
           <div className="p-8 text-center text-gray-500">
             <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent"></div>
-            <p className="mt-4 text-gray-600">Đang tải danh sách yêu cầu...</p>
+            <p className="mt-4 text-gray-600">
+              Đang tải danh sách tạm trú/tạm vắng...
+            </p>
           </div>
         ) : filteredRequests.length === 0 ? (
           <div className="p-8 text-center text-gray-500">
-            <p className="text-lg">Chưa có đơn nào</p>
+            <p className="text-lg">Không có trường hợp đang tạm trú/tạm vắng</p>
             <p className="text-sm text-gray-400 mt-1">
-              {requests.length > 0 ? "Không tìm thấy đơn phù hợp với bộ lọc" : "Danh sách đơn trống"}
+              {requests.length > 0
+                ? "Không tìm thấy trường hợp phù hợp với bộ lọc"
+                : "Danh sách trống"}
             </p>
           </div>
         ) : (
@@ -403,7 +492,7 @@ export default function TamTruVang() {
                     CCCD
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
-                    Thời gian
+                    Thời gian hiệu lực
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Trạng thái
@@ -415,10 +504,7 @@ export default function TamTruVang() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredRequests.map((request) => (
-                  <tr
-                    key={request.id}
-                    className="hover:bg-gray-50"
-                  >
+                  <tr key={request.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       #{request.id}
                     </td>
@@ -426,18 +512,24 @@ export default function TamTruVang() {
                       {requestTypeLabels[request.type] || request.type}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {request.nguoiGui?.hoTen || request.nguoiGui?.username || "-"}
+                      {request.nguoiGui?.hoTen ||
+                        request.nguoiGui?.username ||
+                        "-"}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {request.nguoiGui?.cccd || "-"}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {formatDateRange(request.payload?.tuNgay, request.payload?.denNgay)}
+                      {formatDateRange(
+                        request.payload?.tuNgay,
+                        request.payload?.denNgay
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
-                          statusColors[request.status] || "bg-gray-100 text-gray-700"
+                          statusColors[request.status] ||
+                          "bg-gray-100 text-gray-700"
                         }`}
                       >
                         {statusLabels[request.status] || request.status}
@@ -472,6 +564,3 @@ export default function TamTruVang() {
     </div>
   );
 }
-
-
-

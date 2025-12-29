@@ -1,10 +1,72 @@
 import { Router } from "express";
 import * as jwt from "jsonwebtoken";
 import { query } from "../db";
-import { requireAuth, RoleCode, TaskCode } from "../middlewares/auth.middleware";
+import {
+  requireAuth,
+  RoleCode,
+  TaskCode,
+} from "../middlewares/auth.middleware";
 import { normalizeCCCD } from "../utils/cccd";
 
 const router = Router();
+
+async function resolvePersonLink(username: string, personId?: number | null) {
+  const normalizedCCCD = normalizeCCCD(username || "");
+
+  const personById = personId
+    ? await query(
+        `SELECT nk.id, nk."hoTen", nk."hoKhauId", hk."chuHoId"
+         FROM nhan_khau nk
+         JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+         WHERE nk.id = $1`,
+        [personId]
+      )
+    : null;
+
+  if (personById && personById.rowCount > 0) {
+    const p = personById.rows[0];
+    return {
+      linked: true,
+      personInfo: {
+        personId: p.id,
+        hoTen: p.hoTen,
+        householdId: p.hoKhauId,
+        isHeadOfHousehold: Number(p.chuHoId) === Number(p.id),
+      },
+    } as const;
+  }
+
+  if (normalizedCCCD) {
+    const personByCCCD = await query(
+      `SELECT nk.id, nk."hoTen", nk."hoKhauId", hk."chuHoId"
+       FROM nhan_khau nk
+       JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+       WHERE normalize_cccd(nk.cccd) = $1
+       LIMIT 1`,
+      [normalizedCCCD]
+    );
+
+    if (personByCCCD.rowCount > 0) {
+      const p = personByCCCD.rows[0];
+      return {
+        linked: true,
+        personInfo: {
+          personId: p.id,
+          hoTen: p.hoTen,
+          householdId: p.hoKhauId,
+          isHeadOfHousehold: Number(p.chuHoId) === Number(p.id),
+        },
+      } as const;
+    }
+  }
+
+  return {
+    linked: false,
+    personInfo: null,
+    message:
+      "Chưa có hồ sơ nhân khẩu. Vui lòng tạo yêu cầu hoặc chờ tổ trưởng duyệt.",
+  } as const;
+}
 
 // POST /auth/register
 router.post("/auth/register", async (req, res, next) => {
@@ -23,13 +85,19 @@ router.post("/auth/register", async (req, res, next) => {
         success: false,
         error: {
           code: "VALIDATION_ERROR",
-          message: "Missing required fields: username, password, fullName, role",
+          message:
+            "Missing required fields: username, password, fullName, role",
         },
       });
     }
 
     // Validation: role không hợp lệ
-    const validRoles: RoleCode[] = ["to_truong", "to_pho", "can_bo", "nguoi_dan"];
+    const validRoles: RoleCode[] = [
+      "to_truong",
+      "to_pho",
+      "can_bo",
+      "nguoi_dan",
+    ];
     if (!validRoles.includes(role as RoleCode)) {
       return res.status(400).json({
         success: false,
@@ -115,10 +183,9 @@ router.post("/auth/register", async (req, res, next) => {
     }
 
     // Check uniqueness: username đã tồn tại
-    const checkUser = await query(
-      `SELECT id FROM users WHERE username = $1`,
-      [finalUsername]
-    );
+    const checkUser = await query(`SELECT id FROM users WHERE username = $1`, [
+      finalUsername,
+    ]);
 
     if (checkUser.rowCount && checkUser.rowCount > 0) {
       return res.status(409).json({
@@ -150,12 +217,18 @@ router.post("/auth/register", async (req, res, next) => {
 // POST /auth/login
 router.post("/auth/login", async (req, res, next) => {
   try {
-    const { username, password } = req.body as { username?: string; password?: string };
+    const { username, password } = req.body as {
+      username?: string;
+      password?: string;
+    };
 
     if (!username || !password) {
       return res.status(400).json({
         success: false,
-        error: { code: "VALIDATION_ERROR", message: "Missing username or password" },
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Missing username or password",
+        },
       });
     }
 
@@ -169,7 +242,10 @@ router.post("/auth/login", async (req, res, next) => {
     if (result.rowCount === 0) {
       return res.status(401).json({
         success: false,
-        error: { code: "INVALID_CREDENTIALS", message: "Invalid username or password" },
+        error: {
+          code: "INVALID_CREDENTIALS",
+          message: "Invalid username or password",
+        },
       });
     }
 
@@ -179,7 +255,10 @@ router.post("/auth/login", async (req, res, next) => {
     if (user.password !== password) {
       return res.status(401).json({
         success: false,
-        error: { code: "INVALID_CREDENTIALS", message: "Invalid username or password" },
+        error: {
+          code: "INVALID_CREDENTIALS",
+          message: "Invalid username or password",
+        },
       });
     }
 
@@ -191,11 +270,9 @@ router.post("/auth/login", async (req, res, next) => {
       });
     }
 
-    const accessToken = jwt.sign(
-      { userId: user.id, role: user.role },
-      secret,
-      { expiresIn: "1d" }
-    );
+    const accessToken = jwt.sign({ userId: user.id, role: user.role }, secret, {
+      expiresIn: "1d",
+    });
 
     // Chuẩn bị response data
     const responseData: any = {
@@ -210,62 +287,18 @@ router.post("/auth/login", async (req, res, next) => {
 
     // Đối với người dân: kiểm tra liên kết với nhan_khau
     if (user.role === "nguoi_dan") {
-      let linked = false;
-      let personInfo = null;
-
-      // Ưu tiên dùng personId nếu đã có (đã liên kết cứng)
-      if (user.personId) {
-        const personResult = await query(
-          `SELECT id, "hoTen", "hoKhauId" FROM nhan_khau WHERE id = $1`,
-          [user.personId]
-        );
-
-        if (personResult.rowCount > 0) {
-          linked = true;
-          const person = personResult.rows[0];
-          personInfo = {
-            personId: person.id,
-            hoTen: person.hoTen,
-            householdId: person.hoKhauId,
-          };
+      const resolved = await resolvePersonLink(user.username, user.personId);
+      responseData.user.linked = resolved.linked;
+      if (resolved.linked && resolved.personInfo) {
+        responseData.user.personInfo = resolved.personInfo;
+        if (!user.personId) {
+          await query(`UPDATE users SET "personId" = $1 WHERE id = $2`, [
+            resolved.personInfo.personId,
+            user.id,
+          ]);
         }
-      }
-
-      // Nếu chưa có personId, thử tìm theo CCCD
-      if (!linked) {
-        const normalizedCCCD = normalizeCCCD(user.username);
-
-        if (normalizedCCCD) {
-          const personResult = await query(
-            `SELECT id, "hoTen", "hoKhauId"
-             FROM nhan_khau
-             WHERE normalize_cccd(cccd) = $1`,
-            [normalizedCCCD]
-          );
-
-          if (personResult.rowCount > 0) {
-            linked = true;
-            const person = personResult.rows[0];
-            personInfo = {
-              personId: person.id,
-              hoTen: person.hoTen,
-              householdId: person.hoKhauId,
-            };
-
-            // Tự động cập nhật personId để lần sau nhanh hơn
-            await query(
-              `UPDATE users SET "personId" = $1 WHERE id = $2`,
-              [person.id, user.id]
-            );
-          }
-        }
-      }
-
-      responseData.user.linked = linked;
-      if (linked && personInfo) {
-        responseData.user.personInfo = personInfo;
-      } else {
-        responseData.user.message = "Chưa có hồ sơ nhân khẩu. Vui lòng tạo yêu cầu hoặc chờ tổ trưởng duyệt.";
+      } else if (resolved.message) {
+        responseData.user.message = resolved.message;
       }
     }
 
@@ -288,66 +321,25 @@ router.get("/auth/me", requireAuth, async (req, res) => {
   }
 
   const user = req.user as any;
-  const responseData = { ...user };
+  const responseData: any = { ...user };
 
   // Đối với người dân: kiểm tra liên kết với nhan_khau
   if (user.role === "nguoi_dan") {
-    let linked = false;
-    let personInfo = null;
-
-    // Ưu tiên dùng personId nếu đã có
-    if (user.personId) {
-      const personResult = await query(
-        `SELECT id, "hoTen", "hoKhauId" FROM nhan_khau WHERE id = $1`,
-        [user.personId]
-      );
-
-      if (personResult.rowCount > 0) {
-        linked = true;
-        const person = personResult.rows[0];
-        personInfo = {
-          personId: person.id,
-          hoTen: person.hoTen,
-          householdId: person.hoKhauId,
-        };
+    const resolved = await resolvePersonLink(
+      user.username,
+      (user as any).personId
+    );
+    responseData.linked = resolved.linked;
+    if (resolved.linked && resolved.personInfo) {
+      responseData.personInfo = resolved.personInfo;
+      if (!(user as any).personId) {
+        await query(`UPDATE users SET "personId" = $1 WHERE id = $2`, [
+          resolved.personInfo.personId,
+          user.id,
+        ]);
       }
-    }
-
-    // Nếu chưa có personId, thử tìm theo CCCD
-    if (!linked) {
-      const normalizedCCCD = normalizeCCCD(user.username);
-
-      if (normalizedCCCD) {
-        const personResult = await query(
-          `SELECT id, "hoTen", "hoKhauId"
-           FROM nhan_khau
-           WHERE normalize_cccd(cccd) = $1`,
-          [normalizedCCCD]
-        );
-
-        if (personResult.rowCount > 0) {
-          linked = true;
-          const person = personResult.rows[0];
-          personInfo = {
-            personId: person.id,
-            hoTen: person.hoTen,
-            householdId: person.hoKhauId,
-          };
-
-          // Tự động cập nhật personId
-          await query(
-            `UPDATE users SET "personId" = $1 WHERE id = $2`,
-            [person.id, user.id]
-          );
-        }
-      }
-    }
-
-    responseData.linked = linked;
-    if (linked && personInfo) {
-      responseData.personInfo = personInfo;
-    } else {
-      responseData.message = "Chưa có hồ sơ nhân khẩu. Vui lòng tạo yêu cầu hoặc chờ tổ trưởng duyệt.";
+    } else if (resolved.message) {
+      responseData.message = resolved.message;
     }
   }
 

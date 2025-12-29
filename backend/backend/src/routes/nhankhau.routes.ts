@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { query } from "../db";
+import { pool, query } from "../db";
 import { requireAuth, requireTask } from "../middlewares/auth.middleware";
 import { normalizeDateOnly } from "../utils/date";
 import { requireRole } from "../middlewares/auth.middleware";
@@ -40,6 +40,7 @@ router.get(
           nk."ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
           nk."diaChiThuongTruTruoc", nk."ngheNghiep", nk."noiLamViec", nk."ghiChu",
           nk."trangThai", nk."userId", nk."createdAt", nk."updatedAt",
+          hk."soHoKhau" AS "soHoKhau",
           -- residentStatus derived from trangThai
           CASE
             WHEN nk."trangThai" = 'tam_tru' THEN 'tam_tru'
@@ -60,7 +61,10 @@ router.get(
             SELECT COUNT(*) FROM phan_anh pa
             WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')
           ),0) AS "pendingReportsCount"
-         FROM nhan_khau nk WHERE nk."hoKhauId" = $1 ORDER BY nk."createdAt" DESC`,
+         FROM nhan_khau nk
+         LEFT JOIN ho_khau hk ON hk.id = nk."hoKhauId"
+         WHERE nk."hoKhauId" = $1
+         ORDER BY nk."createdAt" DESC`,
         [Number(hoKhauId)]
       );
 
@@ -77,10 +81,157 @@ router.get(
         ...row,
         isChuHo: row.id === chuHoId,
         // If quanHe is not set but this is chu ho, set it for display
-        quanHe: row.quanHe || (row.id === chuHoId ? 'chu_ho' : row.quanHe)
+        quanHe: row.quanHe || (row.id === chuHoId ? "chu_ho" : row.quanHe),
       }));
 
       return res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// Global search endpoint for nhan khau across TDP with optional filters
+router.get(
+  "/nhan-khau/search",
+  requireAuth,
+  requireRole(["to_truong", "to_pho", "can_bo"]),
+  async (req, res, next) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      const limit = Number(req.query.limit || 100);
+      const offset = Number(req.query.offset || 0);
+
+      const ageGroup = String(req.query.ageGroup || "").trim();
+      const gender = String(req.query.gender || "").trim();
+      const residenceStatus = String(req.query.residenceStatus || "").trim();
+      const movementStatus = String(req.query.movementStatus || "").trim();
+      const feedbackStatus = String(req.query.feedbackStatus || "").trim();
+
+      const hasFilters =
+        ageGroup || gender || residenceStatus || movementStatus || feedbackStatus;
+
+      if (!hasFilters && q.length < 2) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Cần nhập từ khóa (≥2 ký tự) hoặc chọn ít nhất một bộ lọc",
+          },
+        });
+      }
+
+      if (q && q.length < 2) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Từ khóa cần tối thiểu 2 ký tự",
+          },
+        });
+      }
+
+      const conditions: string[] = [];
+      const values: any[] = [];
+
+      if (q) {
+        values.push(`%${q}%`);
+        conditions.push(
+          `(nw."hoTen" ILIKE $${values.length} OR nw.cccd ILIKE $${values.length} OR nw."soHoKhau" ILIKE $${values.length})`
+        );
+      }
+
+      // Age group filter (derived from ngaySinh)
+      const ageRanges: Record<string, [number, number]> = {
+        MAM_NON: [3, 5],
+        CAP_1: [6, 10],
+        CAP_2: [11, 14],
+        CAP_3: [15, 17],
+        LAO_DONG: [18, 59],
+        NGHI_HUU: [60, 200],
+      };
+      if (ageGroup && ageRanges[ageGroup]) {
+        const [minAge, maxAge] = ageRanges[ageGroup];
+        values.push(minAge, maxAge);
+        conditions.push(`(nw."ageYears" BETWEEN $${values.length - 1} AND $${values.length})`);
+      }
+
+      if (gender) {
+        values.push(gender);
+        conditions.push(`nw."gioiTinh" = $${values.length}`);
+      }
+
+      if (residenceStatus) {
+        if (residenceStatus === "Thường trú") {
+          conditions.push(`nw."residentStatus" = 'thuong_tru'`);
+        } else if (residenceStatus === "Tạm trú") {
+          conditions.push(`nw."residentStatus" = 'tam_tru'`);
+        } else if (residenceStatus === "Tạm vắng") {
+          conditions.push(`nw."residentStatus" = 'tam_vang'`);
+        }
+      }
+
+      if (movementStatus) {
+        if (movementStatus === "moi_sinh") {
+          conditions.push(`nw."movementStatus" = 'moi_sinh'`);
+        } else if (movementStatus === "da_chuyen_di") {
+          conditions.push(`nw."movementStatus" = 'chuyen_di'`);
+        } else if (movementStatus === "da_qua_doi") {
+          conditions.push(`nw."movementStatus" = 'qua_doi'`);
+        } else if (movementStatus === "binh_thuong") {
+          conditions.push(`nw."movementStatus" = 'binh_thuong'`);
+        }
+      }
+
+      if (feedbackStatus === "has_new") {
+        conditions.push(`nw."pendingReportsCount" > 0`);
+      } else if (feedbackStatus === "no_new") {
+        conditions.push(`nw."pendingReportsCount" = 0`);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const result = await query(
+        `WITH nk_with AS (
+           SELECT
+             nk.id, nk."hoTen", nk."biDanh", nk.cccd,
+             nk."ngayCapCCCD"::text AS "ngayCapCCCD",
+             nk."noiCapCCCD",
+             nk."ngaySinh"::text AS "ngaySinh",
+             nk."gioiTinh", nk."noiSinh", nk."nguyenQuan", nk."danToc", nk."tonGiao", nk."quocTich",
+             nk."hoKhauId", nk."quanHe", nk."trangThai", nk."createdAt", nk."updatedAt",
+             hk."soHoKhau" AS "soHoKhau",
+             hk."diaChi" AS "diaChi",
+             CASE
+               WHEN nk."trangThai" = 'tam_tru' THEN 'tam_tru'
+               WHEN nk."trangThai" = 'tam_vang' THEN 'tam_vang'
+               ELSE 'thuong_tru'
+             END AS "residentStatus",
+             CASE
+               WHEN EXISTS (
+                 SELECT 1 FROM bien_dong bd WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh'
+               ) THEN 'moi_sinh'
+               WHEN nk."trangThai" = 'chuyen_di' THEN 'chuyen_di'
+               WHEN nk."trangThai" = 'khai_tu' THEN 'qua_doi'
+               ELSE 'binh_thuong'
+             END AS "movementStatus",
+             COALESCE((
+               SELECT COUNT(*) FROM phan_anh pa
+               WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')
+             ),0) AS "pendingReportsCount",
+             DATE_PART('year', age(current_date, nk."ngaySinh"))::int AS "ageYears"
+           FROM nhan_khau nk
+           LEFT JOIN ho_khau hk ON hk.id = nk."hoKhauId"
+         )
+         SELECT *
+         FROM nk_with nw
+         ${whereClause}
+         ORDER BY nw."createdAt" DESC
+         LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        [...values, limit, offset]
+      );
+
+      return res.json({ success: true, data: result.rows });
     } catch (err) {
       next(err);
     }
@@ -191,7 +342,8 @@ router.post(
           success: false,
           error: {
             code: "FORBIDDEN",
-            message: "Người dân không được phép đặt quan hệ là 'Chủ hộ'. Vui lòng gửi yêu cầu để cán bộ xử lý.",
+            message:
+              "Người dân không được phép đặt quan hệ là 'Chủ hộ'. Vui lòng gửi yêu cầu để cán bộ xử lý.",
           },
         });
       }
@@ -203,7 +355,7 @@ router.post(
           `SELECT "trangThai", "chuHoId" FROM ho_khau WHERE id = $1`,
           [hoKhauId]
         );
-        
+
         if ((hoKhauCheck?.rowCount ?? 0) === 0) {
           return res.status(400).json({
             success: false,
@@ -222,12 +374,13 @@ router.post(
         );
 
         const hoKhau = hoKhauCheck.rows[0];
-        if (((existingChuHo?.rowCount ?? 0) > 0) || hoKhau.chuHoId) {
+        if ((existingChuHo?.rowCount ?? 0) > 0 || hoKhau.chuHoId) {
           return res.status(400).json({
             success: false,
             error: {
               code: "DUPLICATE_CHU_HO",
-              message: "Hộ khẩu này đã có chủ hộ. Không thể thêm chủ hộ mới. Vui lòng sử dụng chức năng 'Đổi chủ hộ' nếu muốn thay đổi.",
+              message:
+                "Hộ khẩu này đã có chủ hộ. Không thể thêm chủ hộ mới. Vui lòng sử dụng chức năng 'Đổi chủ hộ' nếu muốn thay đổi.",
             },
           });
         }
@@ -241,36 +394,50 @@ router.post(
         });
       }
 
-      const r = await query(
-        `INSERT INTO nhan_khau
-         ("hoKhauId","hoTen","biDanh","cccd","ngayCapCCCD","noiCapCCCD","ngaySinh","gioiTinh","noiSinh","nguyenQuan","danToc","tonGiao","quocTich","quanHe","ngayDangKyThuongTru","diaChiThuongTruTruoc","ngheNghiep","noiLamViec","ghiChu")
-         VALUES
-         ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-         RETURNING *`,
-        [
-          hoKhauId,
-          hoTen,
-          biDanh ?? null,
-          cccd ?? null,
-          normalizeDateOnly(ngayCapCCCD) ?? null,
-          noiCapCCCD ?? null,
-          normalizeDateOnly(ngaySinh) ?? null,
-          gioiTinh ?? null,
-          noiSinh ?? null,
-          nguyenQuan ?? null,
-          danToc ?? null,
-          tonGiao ?? null,
-          quocTich ?? null,
-          quanHe,
-          normalizeDateOnly(ngayDangKyThuongTru) ?? null,
-          diaChiThuongTruTruoc ?? null,
-          ngheNghiep ?? null,
-          noiLamViec ?? null,
-          ghiChu ?? null,
-        ]
-      );
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.user_id', $1::text, true)", [
+          req.user?.id ? String(req.user.id) : "",
+        ]);
 
-      return res.status(201).json({ success: true, data: r.rows[0] });
+        const r = await client.query(
+          `INSERT INTO nhan_khau
+           ("hoKhauId","hoTen","biDanh","cccd","ngayCapCCCD","noiCapCCCD","ngaySinh","gioiTinh","noiSinh","nguyenQuan","danToc","tonGiao","quocTich","quanHe","ngayDangKyThuongTru","diaChiThuongTruTruoc","ngheNghiep","noiLamViec","ghiChu")
+           VALUES
+           ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+           RETURNING *`,
+          [
+            hoKhauId,
+            hoTen,
+            biDanh ?? null,
+            cccd ?? null,
+            normalizeDateOnly(ngayCapCCCD) ?? null,
+            noiCapCCCD ?? null,
+            normalizeDateOnly(ngaySinh) ?? null,
+            gioiTinh ?? null,
+            noiSinh ?? null,
+            nguyenQuan ?? null,
+            danToc ?? null,
+            tonGiao ?? null,
+            quocTich ?? null,
+            quanHe,
+            normalizeDateOnly(ngayDangKyThuongTru) ?? null,
+            diaChiThuongTruTruoc ?? null,
+            ngheNghiep ?? null,
+            noiLamViec ?? null,
+            ghiChu ?? null,
+          ]
+        );
+
+        await client.query("COMMIT");
+        return res.status(201).json({ success: true, data: r.rows[0] });
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
     } catch (err) {
       next(err);
     }
@@ -295,7 +462,8 @@ router.get(
         });
       }
 
-      const r = await query(`
+      const r = await query(
+        `
         SELECT
           nk.id, nk."hoTen", nk."biDanh", nk.cccd,
           nk."ngayCapCCCD"::text AS "ngayCapCCCD",
@@ -318,7 +486,9 @@ router.get(
             ELSE 'binh_thuong'
           END AS "movementStatus",
           COALESCE((SELECT COUNT(*) FROM phan_anh pa WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')),0) AS "pendingReportsCount"
-         FROM nhan_khau nk WHERE nk.id = $1`, [id]);
+         FROM nhan_khau nk WHERE nk.id = $1`,
+        [id]
+      );
       if (r.rowCount === 0) {
         return res.status(404).json({
           success: false,
@@ -413,7 +583,10 @@ router.patch(
         fields.push({ column: "biDanh", value: biDanh });
       if (cccd !== undefined) fields.push({ column: "cccd", value: cccd });
       if (ngayCapCCCD !== undefined)
-        fields.push({ column: "ngayCapCCCD", value: normalizeDateOnly(ngayCapCCCD) });
+        fields.push({
+          column: "ngayCapCCCD",
+          value: normalizeDateOnly(ngayCapCCCD),
+        });
       if (noiCapCCCD !== undefined)
         fields.push({ column: "noiCapCCCD", value: noiCapCCCD });
       if (ngaySinh !== undefined)
@@ -520,7 +693,8 @@ router.patch(
             success: false,
             error: {
               code: "FORBIDDEN",
-              message: "Người dân không được phép cập nhật quan hệ thành 'Chủ hộ'. Vui lòng gửi yêu cầu để cán bộ xử lý.",
+              message:
+                "Người dân không được phép cập nhật quan hệ thành 'Chủ hộ'. Vui lòng gửi yêu cầu để cán bộ xử lý.",
             },
           });
         }
@@ -553,7 +727,7 @@ router.patch(
         );
 
         if (
-          ((existingChuHo?.rowCount ?? 0) > 0) ||
+          (existingChuHo?.rowCount ?? 0) > 0 ||
           ((hoKhauCheck?.rowCount ?? 0) > 0 &&
             hoKhauCheck.rows[0].chuHoId &&
             hoKhauCheck.rows[0].chuHoId !== id)
@@ -562,7 +736,8 @@ router.patch(
             success: false,
             error: {
               code: "DUPLICATE_CHU_HO",
-              message: "Hộ khẩu này đã có chủ hộ. Không thể đặt nhân khẩu này làm chủ hộ. Vui lòng sử dụng chức năng 'Đổi chủ hộ' nếu muốn thay đổi.",
+              message:
+                "Hộ khẩu này đã có chủ hộ. Không thể đặt nhân khẩu này làm chủ hộ. Vui lòng sử dụng chức năng 'Đổi chủ hộ' nếu muốn thay đổi.",
             },
           });
         }
@@ -572,22 +747,36 @@ router.patch(
         .map((f, idx) => `"${f.column}" = $${idx + 1}`)
         .join(", ");
       const values = fields.map((f) => (f.value === "" ? null : f.value));
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.user_id', $1::text, true)", [
+          req.user?.id ? String(req.user.id) : "",
+        ]);
 
-      const r = await query(
-        `UPDATE nhan_khau SET ${setClauses} WHERE id = $${
-          fields.length + 1
-        } RETURNING *`,
-        [...values, id]
-      );
+        const r = await client.query(
+          `UPDATE nhan_khau SET ${setClauses} WHERE id = $${
+            fields.length + 1
+          } RETURNING *`,
+          [...values, id]
+        );
 
-      if ((r?.rowCount ?? 0) === 0) {
-        return res.status(404).json({
-          success: false,
-          error: { code: "NOT_FOUND", message: "Nhân khẩu không tồn tại" },
-        });
+        await client.query("COMMIT");
+
+        if ((r?.rowCount ?? 0) === 0) {
+          return res.status(404).json({
+            success: false,
+            error: { code: "NOT_FOUND", message: "Nhân khẩu không tồn tại" },
+          });
+        }
+
+        return res.json({ success: true, data: r.rows[0] });
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
       }
-
-      return res.json({ success: true, data: r.rows[0] });
     } catch (err) {
       next(err);
     }
@@ -595,46 +784,3 @@ router.patch(
 );
 
 export default router;
-
-// Global search endpoint for nhan khau across TDP
-router.get(
-  "/nhan-khau/search",
-  requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
-  async (req, res, next) => {
-    try {
-      const q = String(req.query.q || "").trim();
-      const limit = Number(req.query.limit || 100);
-      const offset = Number(req.query.offset || 0);
-
-      if (!q || q.length < 2) {
-        return res.status(400).json({
-          success: false,
-          error: { code: "VALIDATION_ERROR", message: "Query q is required (min 2 chars)" },
-        });
-      }
-      const searchParam = `%${q}%`;
-      const result = await query(
-        `SELECT
-           nk.id, nk."hoTen", nk."biDanh", nk.cccd,
-           nk."ngayCapCCCD"::text AS "ngayCapCCCD",
-           nk."noiCapCCCD",
-           nk."ngaySinh"::text AS "ngaySinh",
-           nk."gioiTinh", nk."noiSinh", nk."nguyenQuan", nk."danToc", nk."tonGiao", nk."quocTich",
-           nk."hoKhauId", nk."quanHe", nk."trangThai",
-           hk."soHoKhau" AS "soHoKhau",
-           hk."diaChi" AS "diaChi"
-         FROM nhan_khau nk
-         LEFT JOIN ho_khau hk ON hk.id = nk."hoKhauId"
-         WHERE (nk."hoTen" ILIKE $1 OR nk.cccd ILIKE $1)
-         ORDER BY nk."createdAt" DESC
-         LIMIT $2 OFFSET $3`,
-        [searchParam, limit, offset]
-      );
-
-      return res.json({ success: true, data: result.rows });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
