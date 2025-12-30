@@ -107,6 +107,7 @@ const getBienDongStatus = (nhanKhau: NhanKhau): BienDongStatus => {
     (nhanKhau as any).bienDong ||
     (nhanKhau as any).trangThaiBienDong ||
     (nhanKhau as any).bienDongStatus ||
+    (nhanKhau as any).movementStatus ||
     nhanKhau.trangThai;
   const normalized = typeof raw === "string" ? raw.toLowerCase() : "";
 
@@ -116,6 +117,7 @@ const getBienDongStatus = (nhanKhau: NhanKhau): BienDongStatus => {
   if (
     normalized.includes("da_chuyen_di") ||
     normalized.includes("chuyen_di") ||
+    normalized.includes("chuyển đi") ||
     normalized.includes("moved")
   ) {
     return BienDongStatus.DA_CHUYEN_DI;
@@ -123,6 +125,9 @@ const getBienDongStatus = (nhanKhau: NhanKhau): BienDongStatus => {
   if (
     normalized.includes("da_qua_doi") ||
     normalized.includes("qua_doi") ||
+    normalized.includes("qua đời") ||
+    normalized.includes("khai_tu") ||
+    normalized.includes("khai tử") ||
     normalized.includes("deceased")
   ) {
     return BienDongStatus.DA_QUA_DOI;
@@ -514,7 +519,9 @@ export default function NhanKhau() {
       if (resp.success) {
         setHistoryRecords(resp.data || []);
       } else {
-        setHistoryError(resp?.error?.message || "Không tải được lịch sử");
+        setHistoryError(
+          (resp as any)?.error?.message || "Không tải được lịch sử"
+        );
       }
     } catch (err: any) {
       setHistoryError(err?.message || "Không tải được lịch sử");
@@ -658,41 +665,25 @@ export default function NhanKhau() {
     const requiredFields: (keyof NhanKhauForm)[] = [
       "hoKhauId",
       "hoTen",
-      "quanHe",
+      "cccd",
       "ngaySinh",
       "gioiTinh",
+      "quanHe",
       "noiSinh",
       "nguyenQuan",
       "danToc",
       "tonGiao",
       "quocTich",
-    ];
-
-    const missing = requiredFields.filter((key) => !formData[key]);
-    if (missing.length > 0) {
-      const message =
-        "Vui lòng nhập đầy đủ các trường bắt buộc (Hộ khẩu, Họ tên, Quan hệ, Ngày sinh, Giới tính, Nơi sinh, Nguyên quán, Dân tộc, Tôn giáo, Quốc tịch)";
-      setError(message);
-      showToast(message, "error");
-      return;
-    }
-
-    const optionalKeys: (keyof NhanKhauForm)[] = [
-      "cccd",
       "ngheNghiep",
       "noiLamViec",
-      "biDanh",
       "ngayDangKyThuongTru",
-      "noiCapCCCD",
-      "ngayCapCCCD",
       "diaChiThuongTruTruoc",
     ];
-    const hasMissingOptional = optionalKeys.some(
-      (key) => !normalizeField(formData[key])
-    );
-    if (hasMissingOptional && !normalizeField(formData.ghiChu)) {
+
+    const missing = requiredFields.filter((key) => !normalizeField(formData[key]));
+    if (missing.length > 0) {
       const message =
-        "Vui lòng ghi chú lý do bỏ trống các trường tùy chọn vào phần Ghi chú.";
+        "Vui lòng nhập đầy đủ các trường bắt buộc (Hộ khẩu, Họ tên, CCCD/CMND, Ngày sinh, Giới tính, Quan hệ, Nơi sinh, Nguyên quán, Dân tộc, Tôn giáo, Quốc tịch, Nghề nghiệp, Nơi làm việc, Ngày đăng ký thường trú, Địa chỉ thường trú trước đây)";
       setError(message);
       showToast(message, "error");
       return;
@@ -717,28 +708,28 @@ export default function NhanKhau() {
         hoKhauId: hoKhauIdNumber,
         hoTen: normalizeField(formData.hoTen)!,
         biDanh: normalizeField(formData.biDanh) || undefined,
-        cccd: normalizeField(formData.cccd) || undefined,
+        cccd: normalizeField(formData.cccd)!,
         ngayCapCCCD: normalizeDateOnly(formData.ngayCapCCCD) || undefined,
         noiCapCCCD: normalizeField(formData.noiCapCCCD) || undefined,
-        ngaySinh: normalizeDateOnly(formData.ngaySinh) || undefined,
+        ngaySinh: normalizeDateOnly(formData.ngaySinh)!,
         gioiTinh:
           formData.gioiTinh === "nam" ||
           formData.gioiTinh === "nu" ||
           formData.gioiTinh === "khac"
             ? (formData.gioiTinh as "nam" | "nu" | "khac")
             : undefined,
-        noiSinh: normalizeField(formData.noiSinh) || undefined,
-        nguyenQuan: normalizeField(formData.nguyenQuan) || undefined,
-        danToc: normalizeField(formData.danToc) || undefined,
-        tonGiao: normalizeField(formData.tonGiao) || undefined,
-        quocTich: normalizeField(formData.quocTich) || undefined,
+        noiSinh: normalizeField(formData.noiSinh)!,
+        nguyenQuan: normalizeField(formData.nguyenQuan)!,
+        danToc: normalizeField(formData.danToc)!,
+        tonGiao: normalizeField(formData.tonGiao)!,
+        quocTich: normalizeField(formData.quocTich)!,
         quanHe: formData.quanHe as any,
         ngayDangKyThuongTru:
-          normalizeDateOnly(formData.ngayDangKyThuongTru) || undefined,
+          normalizeDateOnly(formData.ngayDangKyThuongTru)!,
         diaChiThuongTruTruoc:
-          normalizeField(formData.diaChiThuongTruTruoc) || undefined,
-        ngheNghiep: normalizeField(formData.ngheNghiep) || undefined,
-        noiLamViec: normalizeField(formData.noiLamViec) || undefined,
+          normalizeField(formData.diaChiThuongTruTruoc)!,
+        ngheNghiep: normalizeField(formData.ngheNghiep)!,
+        noiLamViec: normalizeField(formData.noiLamViec)!,
         ghiChu: normalizeField(formData.ghiChu) || undefined,
       });
 
@@ -870,6 +861,7 @@ export default function NhanKhau() {
           normalizeField(viewForm.diaChiThuongTruTruoc) || undefined,
         ngheNghiep: normalizeField(viewForm.ngheNghiep) || undefined,
         noiLamViec: normalizeField(viewForm.noiLamViec) || undefined,
+        ghiChu: normalizeField(viewForm.ghiChu) || undefined,
       };
 
       try {
@@ -1067,6 +1059,12 @@ export default function NhanKhau() {
             </div>
             <div>{toast.message}</div>
           </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
         </div>
       )}
 
@@ -1931,9 +1929,10 @@ export default function NhanKhau() {
                 </label>
 
                 <label className="block text-sm font-medium text-gray-700">
-                  CCCD/CMND
+                  CCCD/CMND <span className="text-red-500">*</span>
                   <input
                     type="text"
+                    required
                     value={formData.cccd}
                     onChange={(e) =>
                       setFormData({ ...formData, cccd: e.target.value })
@@ -1981,9 +1980,10 @@ export default function NhanKhau() {
                 </label>
 
                 <label className="block text-sm font-medium text-gray-700">
-                  Ngày đăng ký thường trú
+                  Ngày đăng ký thường trú <span className="text-red-500">*</span>
                   <input
                     type="date"
+                    required
                     value={formData.ngayDangKyThuongTru}
                     onChange={(e) =>
                       setFormData({
@@ -2001,6 +2001,7 @@ export default function NhanKhau() {
                   Ngày sinh <span className="text-red-500">*</span>
                   <input
                     type="date"
+                    required
                     value={formData.ngaySinh}
                     onChange={(e) =>
                       setFormData({ ...formData, ngaySinh: e.target.value })
@@ -2012,6 +2013,7 @@ export default function NhanKhau() {
                 <label className="block text-sm font-medium text-gray-700">
                   Giới tính <span className="text-red-500">*</span>
                   <select
+                    required
                     value={formData.gioiTinh}
                     onChange={(e) =>
                       setFormData({ ...formData, gioiTinh: e.target.value })
@@ -2029,6 +2031,7 @@ export default function NhanKhau() {
                   Nơi sinh <span className="text-red-500">*</span>
                   <input
                     type="text"
+                    required
                     value={formData.noiSinh}
                     onChange={(e) =>
                       setFormData({ ...formData, noiSinh: e.target.value })
@@ -2043,6 +2046,7 @@ export default function NhanKhau() {
                   Nguyên quán <span className="text-red-500">*</span>
                   <input
                     type="text"
+                    required
                     value={formData.nguyenQuan}
                     onChange={(e) =>
                       setFormData({ ...formData, nguyenQuan: e.target.value })
@@ -2055,6 +2059,7 @@ export default function NhanKhau() {
                   Dân tộc <span className="text-red-500">*</span>
                   <input
                     type="text"
+                    required
                     value={formData.danToc}
                     onChange={(e) =>
                       setFormData({ ...formData, danToc: e.target.value })
@@ -2067,6 +2072,7 @@ export default function NhanKhau() {
                   Tôn giáo <span className="text-red-500">*</span>
                   <input
                     type="text"
+                    required
                     value={formData.tonGiao}
                     onChange={(e) =>
                       setFormData({ ...formData, tonGiao: e.target.value })
@@ -2081,6 +2087,7 @@ export default function NhanKhau() {
                   Quốc tịch <span className="text-red-500">*</span>
                   <input
                     type="text"
+                    required
                     value={formData.quocTich}
                     onChange={(e) =>
                       setFormData({ ...formData, quocTich: e.target.value })
@@ -2127,8 +2134,9 @@ export default function NhanKhau() {
               </div>
 
               <label className="block text-sm font-medium text-gray-700">
-                Địa chỉ thường trú trước đây
+                Địa chỉ thường trú trước đây <span className="text-red-500">*</span>
                 <textarea
+                  required
                   value={formData.diaChiThuongTruTruoc}
                   onChange={(e) =>
                     setFormData({
@@ -2143,9 +2151,10 @@ export default function NhanKhau() {
 
               <div className="grid grid-cols-2 gap-4">
                 <label className="block text-sm font-medium text-gray-700">
-                  Nghề nghiệp
+                  Nghề nghiệp <span className="text-red-500">*</span>
                   <input
                     type="text"
+                    required
                     value={formData.ngheNghiep}
                     onChange={(e) =>
                       setFormData({ ...formData, ngheNghiep: e.target.value })
@@ -2155,9 +2164,10 @@ export default function NhanKhau() {
                 </label>
 
                 <label className="block text-sm font-medium text-gray-700">
-                  Nơi làm việc
+                  Nơi làm việc <span className="text-red-500">*</span>
                   <input
                     type="text"
+                    required
                     value={formData.noiLamViec}
                     onChange={(e) =>
                       setFormData({ ...formData, noiLamViec: e.target.value })
@@ -2176,7 +2186,7 @@ export default function NhanKhau() {
                   }
                   rows={2}
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="Nhập lý do nếu bỏ trống các trường tùy chọn"
+                  placeholder="Thông tin bổ sung nếu có..."
                 />
               </label>
 
@@ -2493,13 +2503,26 @@ export default function NhanKhau() {
                     {/* Phản ánh */}
                     <td className="px-4 py-3 text-center">
                       {(() => {
-                        const count = (nk as any).pendingReportsCount ?? 0;
-                        return count > 0 ? (
-                          <span className="inline-flex items-center rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-semibold text-orange-700">
-                            {count}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400">0</span>
+                        const total = (nk as any).totalReportsCount ?? 0;
+                        const pending = (nk as any).pendingReportsCount ?? 0;
+                        if (total <= 0) {
+                          return <span className="text-xs text-gray-400">0</span>;
+                        }
+
+                        return (
+                          <div className="inline-flex items-center gap-1">
+                            <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                              {total}
+                            </span>
+                            {pending > 0 && (
+                              <span
+                                className="inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-semibold text-orange-700"
+                                title="Số phản ánh đang chờ/đang xử lý"
+                              >
+                                {pending}
+                              </span>
+                            )}
+                          </div>
                         );
                       })()}
                     </td>

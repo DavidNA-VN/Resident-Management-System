@@ -5,9 +5,14 @@ import { apiService, UserInfo } from "../services/api";
 interface ProtectedRouteProps {
   children: ReactNode;
   allowedRoles?: string[];
+  allowedTasks?: string[];
 }
 
-export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
+export default function ProtectedRoute({
+  children,
+  allowedRoles,
+  allowedTasks,
+}: ProtectedRouteProps) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -66,6 +71,16 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
     } else {
       return <Navigate to="/dashboard" replace />;
     }
+  }
+
+  // Check task for staff if allowedTasks is specified
+  if (
+    allowedTasks &&
+    userInfo &&
+    userInfo.role === "can_bo" &&
+    !(userInfo.task && allowedTasks.includes(userInfo.task))
+  ) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;

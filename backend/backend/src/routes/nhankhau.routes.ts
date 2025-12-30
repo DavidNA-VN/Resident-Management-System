@@ -38,7 +38,7 @@ router.get(
           nk."gioiTinh", nk."noiSinh", nk."nguyenQuan", nk."danToc", nk."tonGiao", nk."quocTich",
           nk."hoKhauId", nk."quanHe",
           nk."ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
-          nk."diaChiThuongTruTruoc", nk."ngheNghiep", nk."noiLamViec", nk."ghiChu",
+          nk."diaChiThuongTruTruoc", nk."ngheNghiep", nk."noiLamViec", nk."ghiChu", nk."ghiChuHoKhau", nk."lyDoKhongCoCCCD",
           nk."trangThai", nk."userId", nk."createdAt", nk."updatedAt",
           hk."soHoKhau" AS "soHoKhau",
           -- residentStatus derived from trangThai
@@ -47,20 +47,52 @@ router.get(
             WHEN nk."trangThai" = 'tam_vang' THEN 'tam_vang'
             ELSE 'thuong_tru'
           END AS "residentStatus",
-          -- movementStatus: prefer khai_sinh in bien_dong, else map from trangThai
+          -- movementStatus: prefer approved bien_dong records, then fall back to nhan_khau.trangThai
           CASE
             WHEN EXISTS (
-              SELECT 1 FROM bien_dong bd WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh'
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh' AND bd."trangThai" = 'da_duyet'
             ) THEN 'moi_sinh'
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_tu' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'qua_doi'
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'chuyen_di' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'chuyen_di'
             WHEN nk."trangThai" = 'chuyen_di' THEN 'chuyen_di'
             WHEN nk."trangThai" = 'khai_tu' THEN 'qua_doi'
             ELSE 'binh_thuong'
           END AS "movementStatus",
+          CASE
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'moi_sinh'
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_tu' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'da_qua_doi'
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'chuyen_di' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'da_chuyen_di'
+            WHEN nk."trangThai" = 'chuyen_di' THEN 'da_chuyen_di'
+            WHEN nk."trangThai" = 'khai_tu' THEN 'da_qua_doi'
+            ELSE 'binh_thuong'
+          END AS "bienDongStatus",
           -- count pending reports linked by user account (phan_anh.nguoiPhanAnh = users.id = nk.userId)
           COALESCE((
             SELECT COUNT(*) FROM phan_anh pa
             WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')
           ),0) AS "pendingReportsCount"
+          ,
+          -- total reports linked by user account (all statuses)
+          COALESCE((
+            SELECT COUNT(*) FROM phan_anh pa
+            WHERE pa."nguoiPhanAnh" = nk."userId"
+          ),0) AS "totalReportsCount"
          FROM nhan_khau nk
          LEFT JOIN ho_khau hk ON hk.id = nk."hoKhauId"
          WHERE nk."hoKhauId" = $1
@@ -209,12 +241,38 @@ router.get(
              END AS "residentStatus",
              CASE
                WHEN EXISTS (
-                 SELECT 1 FROM bien_dong bd WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh'
+                 SELECT 1 FROM bien_dong bd
+                 WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh' AND bd."trangThai" = 'da_duyet'
                ) THEN 'moi_sinh'
+               WHEN EXISTS (
+                 SELECT 1 FROM bien_dong bd
+                 WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_tu' AND bd."trangThai" = 'da_duyet'
+               ) THEN 'qua_doi'
+               WHEN EXISTS (
+                 SELECT 1 FROM bien_dong bd
+                 WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'chuyen_di' AND bd."trangThai" = 'da_duyet'
+               ) THEN 'chuyen_di'
                WHEN nk."trangThai" = 'chuyen_di' THEN 'chuyen_di'
                WHEN nk."trangThai" = 'khai_tu' THEN 'qua_doi'
                ELSE 'binh_thuong'
              END AS "movementStatus",
+             CASE
+               WHEN EXISTS (
+                 SELECT 1 FROM bien_dong bd
+                 WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh' AND bd."trangThai" = 'da_duyet'
+               ) THEN 'moi_sinh'
+               WHEN EXISTS (
+                 SELECT 1 FROM bien_dong bd
+                 WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_tu' AND bd."trangThai" = 'da_duyet'
+               ) THEN 'da_qua_doi'
+               WHEN EXISTS (
+                 SELECT 1 FROM bien_dong bd
+                 WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'chuyen_di' AND bd."trangThai" = 'da_duyet'
+               ) THEN 'da_chuyen_di'
+               WHEN nk."trangThai" = 'chuyen_di' THEN 'da_chuyen_di'
+               WHEN nk."trangThai" = 'khai_tu' THEN 'da_qua_doi'
+               ELSE 'binh_thuong'
+             END AS "bienDongStatus",
              COALESCE((
                SELECT COUNT(*) FROM phan_anh pa
                WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')
@@ -268,52 +326,34 @@ router.post(
         ngheNghiep,
         noiLamViec,
         ghiChu,
+        ghiChuHoKhau,
+        lyDoKhongCoCCCD,
       } = req.body;
 
       const requiredFields = [
         hoKhauId,
         hoTen,
-        quanHe,
+        cccd,
         ngaySinh,
         gioiTinh,
+        quanHe,
         noiSinh,
         nguyenQuan,
         danToc,
         tonGiao,
         quocTich,
-      ];
-      if (requiredFields.some((f) => !f)) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: "VALIDATION_ERROR",
-            message:
-              "Vui lòng nhập đầy đủ các trường bắt buộc (Hộ khẩu, Họ tên, Quan hệ, Ngày sinh, Giới tính, Nơi sinh, Nguyên quán, Dân tộc, Tôn giáo, Quốc tịch)",
-          },
-        });
-      }
-
-      const optionalFields = [
-        cccd,
         ngheNghiep,
         noiLamViec,
-        biDanh,
         ngayDangKyThuongTru,
-        noiCapCCCD,
-        ngayCapCCCD,
         diaChiThuongTruTruoc,
       ];
-
-      const hasMissingOptional = optionalFields.some(
-        (v) => v === undefined || v === null || v === ""
-      );
-      if (hasMissingOptional && (!ghiChu || String(ghiChu).trim() === "")) {
+      if (requiredFields.some((f) => f === undefined || f === null || String(f).trim() === "")) {
         return res.status(400).json({
           success: false,
           error: {
             code: "VALIDATION_ERROR",
             message:
-              "Vui lòng ghi chú lý do bỏ trống các trường tùy chọn (CCCD, nghề nghiệp, nơi làm việc, bí danh, ngày đăng ký thường trú, nơi cấp CCCD, ngày cấp CCCD, địa chỉ thường trú trước đây)",
+              "Vui lòng nhập đầy đủ các trường bắt buộc (trừ Ghi chú)",
           },
         });
       }
@@ -403,9 +443,9 @@ router.post(
 
         const r = await client.query(
           `INSERT INTO nhan_khau
-           ("hoKhauId","hoTen","biDanh","cccd","ngayCapCCCD","noiCapCCCD","ngaySinh","gioiTinh","noiSinh","nguyenQuan","danToc","tonGiao","quocTich","quanHe","ngayDangKyThuongTru","diaChiThuongTruTruoc","ngheNghiep","noiLamViec","ghiChu")
+           ("hoKhauId","hoTen","biDanh","cccd","ngayCapCCCD","noiCapCCCD","ngaySinh","gioiTinh","noiSinh","nguyenQuan","danToc","tonGiao","quocTich","quanHe","ngayDangKyThuongTru","diaChiThuongTruTruoc","ngheNghiep","noiLamViec","ghiChu","ghiChuHoKhau","lyDoKhongCoCCCD")
            VALUES
-           ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+           ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
            RETURNING *`,
           [
             hoKhauId,
@@ -427,6 +467,8 @@ router.post(
             ngheNghiep ?? null,
             noiLamViec ?? null,
             ghiChu ?? null,
+            ghiChuHoKhau ?? null,
+            lyDoKhongCoCCCD ?? null,
           ]
         );
 
@@ -472,7 +514,7 @@ router.get(
           nk."gioiTinh", nk."noiSinh", nk."nguyenQuan", nk."danToc", nk."tonGiao", nk."quocTich",
           nk."hoKhauId", nk."quanHe",
           nk."ngayDangKyThuongTru"::text AS "ngayDangKyThuongTru",
-          nk."diaChiThuongTruTruoc", nk."ngheNghiep", nk."noiLamViec", nk."ghiChu",
+          nk."diaChiThuongTruTruoc", nk."ngheNghiep", nk."noiLamViec", nk."ghiChu", nk."ghiChuHoKhau", nk."lyDoKhongCoCCCD",
           nk."trangThai", nk."userId", nk."createdAt", nk."updatedAt",
           CASE
             WHEN nk."trangThai" = 'tam_tru' THEN 'tam_tru'
@@ -480,11 +522,39 @@ router.get(
             ELSE 'thuong_tru'
           END AS "residentStatus",
           CASE
-            WHEN EXISTS (SELECT 1 FROM bien_dong bd WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh') THEN 'moi_sinh'
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'moi_sinh'
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_tu' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'qua_doi'
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'chuyen_di' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'chuyen_di'
             WHEN nk."trangThai" = 'chuyen_di' THEN 'chuyen_di'
             WHEN nk."trangThai" = 'khai_tu' THEN 'qua_doi'
             ELSE 'binh_thuong'
           END AS "movementStatus",
+          CASE
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_sinh' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'moi_sinh'
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'khai_tu' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'da_qua_doi'
+            WHEN EXISTS (
+              SELECT 1 FROM bien_dong bd
+              WHERE bd."nhanKhauId" = nk.id AND bd.loai = 'chuyen_di' AND bd."trangThai" = 'da_duyet'
+            ) THEN 'da_chuyen_di'
+            WHEN nk."trangThai" = 'chuyen_di' THEN 'da_chuyen_di'
+            WHEN nk."trangThai" = 'khai_tu' THEN 'da_qua_doi'
+            ELSE 'binh_thuong'
+          END AS "bienDongStatus",
           COALESCE((SELECT COUNT(*) FROM phan_anh pa WHERE pa."nguoiPhanAnh" = nk."userId" AND pa."trangThai" IN ('cho_xu_ly','dang_xu_ly')),0) AS "pendingReportsCount"
          FROM nhan_khau nk WHERE nk.id = $1`,
         [id]
@@ -575,6 +645,8 @@ router.patch(
         ngheNghiep,
         noiLamViec,
         ghiChu,
+        ghiChuHoKhau,
+        lyDoKhongCoCCCD,
       } = req.body;
 
       const fields: { column: string; value: any }[] = [];
@@ -621,6 +693,10 @@ router.patch(
         fields.push({ column: "noiLamViec", value: noiLamViec });
       if (ghiChu !== undefined)
         fields.push({ column: "ghiChu", value: ghiChu });
+      if (ghiChuHoKhau !== undefined)
+        fields.push({ column: "ghiChuHoKhau", value: ghiChuHoKhau });
+      if (lyDoKhongCoCCCD !== undefined)
+        fields.push({ column: "lyDoKhongCoCCCD", value: lyDoKhongCoCCCD });
 
       const optionalFields = [
         cccd,
@@ -635,7 +711,11 @@ router.patch(
       const providedMissingOptional = optionalFields.some(
         (v) => v !== undefined && (v === null || v === "")
       );
-      if (providedMissingOptional && (ghiChu === undefined || ghiChu === "")) {
+      const providedReason =
+        (ghiChu !== undefined && String(ghiChu).trim() !== "") ||
+        (lyDoKhongCoCCCD !== undefined &&
+          String(lyDoKhongCoCCCD).trim() !== "");
+      if (providedMissingOptional && !providedReason) {
         return res.status(400).json({
           success: false,
           error: {

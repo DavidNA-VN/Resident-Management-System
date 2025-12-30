@@ -45,4 +45,7 @@ function App() {
         }) 
     }));
 }
+// Keep a single source of truth for routing.
+// This prevents stale/duplicated routes in this file (notably /thong-ke) from overriding the real app.
+import App from "./App.tsx";
 export default App;

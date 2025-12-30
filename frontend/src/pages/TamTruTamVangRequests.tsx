@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiService } from "../services/api";
-import TamTruVangDetailModal from "../components/TamTruVangDetailModal";
+import { downloadTamTruTamVangPdf } from "../utils/tamTruTamVangPdf";
 
 const loaiLabels = {
   tam_tru: "Tạm trú",
@@ -117,9 +117,6 @@ export default function TamTruTamVangRequests() {
   const [searchQuery, setSearchQuery] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const [selectedRequestId, setSelectedRequestId] = useState<number | null>(
-    null
-  );
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -367,11 +364,18 @@ export default function TamTruTamVangRequests() {
   };
 
   const handleRefresh = () => loadRequests();
-  const handleViewDetail = (requestId: number) =>
-    setSelectedRequestId(requestId);
-  const handleCloseModal = () => {
-    setSelectedRequestId(null);
-    loadRequests();
+
+  const handleExportPdf = async (requestId: number) => {
+    setError(null);
+    try {
+      const resp = await apiService.getTamTruVangRequestDetail(requestId);
+      if (!resp?.success) {
+        throw new Error((resp as any)?.error?.message || "Không tải được chi tiết đơn");
+      }
+      downloadTamTruTamVangPdf(resp.data);
+    } catch (e: any) {
+      setError(e?.message || "Không thể xuất PDF");
+    }
   };
 
   const resolveLoaiKey = (record: RequestRecord) => {
@@ -613,7 +617,7 @@ export default function TamTruTamVangRequests() {
                           "-";
 
                         const relatedCccd =
-                          request.nhanKhau?.cccd ||
+                          (request as any).nhanKhau?.cccd ||
                           request.payload?.personCccd ||
                           request.payload?.cccd ||
                           request.payload?.nguoiLienQuan?.cccd ||
@@ -655,17 +659,17 @@ export default function TamTruTamVangRequests() {
                       <div
                         className="truncate"
                         title={
-                          request.hoKhau?.diaChi ||
+                          (request as any).hoKhau?.diaChi ||
                           request.payload?.diaChi ||
                           request.diaChi ||
-                          request.hoKhau?.householdAddress ||
+                          (request as any).hoKhau?.householdAddress ||
                           ""
                         }
                       >
-                        {request.hoKhau?.diaChi ||
+                        {(request as any).hoKhau?.diaChi ||
                           request.payload?.diaChi ||
                           request.diaChi ||
-                          request.hoKhau?.householdAddress ||
+                          (request as any).hoKhau?.householdAddress ||
                           "-"}
                       </div>
                     </td>
@@ -686,10 +690,10 @@ export default function TamTruTamVangRequests() {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <button
-                        onClick={() => handleViewDetail(request.id)}
+                        onClick={() => handleExportPdf(request.id)}
                         className="rounded-lg bg-blue-50 text-blue-600 px-3 py-1.5 text-xs font-medium hover:bg-blue-100 transition-colors"
                       >
-                        Xem
+                        Xuất PDF
                       </button>
                     </td>
                   </tr>
@@ -699,15 +703,6 @@ export default function TamTruTamVangRequests() {
           </div>
         )}
       </div>
-
-      {selectedRequestId && (
-        <TamTruVangDetailModal
-          requestId={selectedRequestId}
-          isOpen={true}
-          onClose={handleCloseModal}
-          onRefresh={handleRefresh}
-        />
-      )}
     </div>
   );
 }

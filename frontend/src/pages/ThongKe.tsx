@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
 import { useReactToPrint } from 'react-to-print';
+import { apiService } from '../services/api';
 
 const AGE_GROUPS = [
   { id: 'mam_non', label: 'Mầm non (<3t)' },
@@ -30,13 +30,19 @@ export default function ThongKe() {
   const [showDetails, setShowDetails] = useState(false);
   const loadData = async () => {
     try {
-      const params = new URLSearchParams();
-      filters.genders.forEach(g => params.append('genders', g));
-      filters.ageGroups.forEach(a => params.append('ageGroups', a));
-      filters.residenceTypes.forEach(r => params.append('residenceTypes', r));
+      const res = await apiService.getThongKe({
+        genders: filters.genders,
+        ageGroups: filters.ageGroups,
+        residenceTypes: filters.residenceTypes,
+      });
 
-      const res = await axios.get(`http://localhost:3000/api/thongke?${params.toString()}`);
-      if (res.data.success) setData(res.data);
+      if (res.success) {
+        setData({
+          demographics: res.demographics || [],
+          residence: res.residence || [],
+          details: res.details || [],
+        });
+      }
     } catch (err) {
       console.error("Lỗi kết nối API:", err);
     }

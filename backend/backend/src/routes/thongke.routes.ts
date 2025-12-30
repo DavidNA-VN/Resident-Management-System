@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import pool from '../database';
+import { requireAnyTask, requireAuth } from "../middlewares/auth.middleware";
 
 const router = Router();
 
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, requireAnyTask(["thongke"]), async (req, res) => {
   try {
     const { genders, ageGroups, residenceTypes, startDate, endDate } = req.query;
     const gList = Array.isArray(genders) ? genders : genders ? [genders] : [];

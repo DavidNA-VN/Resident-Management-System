@@ -22,6 +22,15 @@ const loaiLabels: Record<string, string> = {
   khac: "Khác",
 };
 
+const loaiCards: Array<{ key: keyof typeof loaiLabels; img: string }> = [
+  { key: "moi_truong", img: "/images/moitruong.jpg" },
+  { key: "co_so_ha_tang", img: "/images/cosohatang.jpg" },
+  { key: "giao_duc", img: "/images/giaoduc.jpg" },
+  { key: "y_te", img: "/images/yte.jpg" },
+  { key: "an_ninh", img: "/images/anninh.jpg" },
+  { key: "khac", img: "/images/back-up-fe.jpg" },
+];
+
 const statusLabels: Record<string, string> = {
   cho_xu_ly: "Chờ xử lý",
   dang_xu_ly: "Đang xử lý",
@@ -150,21 +159,56 @@ export default function PhanAnh() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Loại phản ánh
+              Chủ đề phản ánh
             </label>
-            <select
-              value={formData.loai}
-              onChange={(e) =>
-                setFormData({ ...formData, loai: e.target.value })
-              }
-              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              {Object.entries(loaiLabels).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {loaiCards.map((item) => {
+                const selected = formData.loai === item.key;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, loai: item.key })}
+                    className={`group overflow-hidden rounded-xl border text-left transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${
+                      selected
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 bg-white hover:border-gray-300"
+                    }`}
+                    aria-pressed={selected}
+                    title={loaiLabels[item.key]}
+                  >
+                    <div className="h-24 w-full bg-gray-100">
+                      <img
+                        src={item.img}
+                        alt={loaiLabels[item.key]}
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                    <div className="px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-gray-900">
+                          {loaiLabels[item.key]}
+                        </span>
+                        {selected && (
+                          <span className="text-xs font-semibold text-blue-700">
+                            Đã chọn
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        {item.key === "moi_truong" && "Vệ sinh, rác thải, ô nhiễm"}
+                        {item.key === "co_so_ha_tang" && "Đường xá, điện nước, công trình"}
+                        {item.key === "giao_duc" && "Trường lớp, học tập, trẻ em"}
+                        {item.key === "y_te" && "Khám chữa bệnh, dịch bệnh"}
+                        {item.key === "an_ninh" && "Trật tự, an toàn khu phố"}
+                        {item.key === "khac" && "Chủ đề khác"}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div>

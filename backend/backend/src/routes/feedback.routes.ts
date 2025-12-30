@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { query } from "../db";
 import { feedbackController } from "../controllers/feedback.controller";
-import { requireAuth, requireRole } from "../middlewares/auth.middleware";
+import {
+  requireAnyTask,
+  requireAuth,
+  requireRole,
+  requireRoleOrAnyTask,
+} from "../middlewares/auth.middleware";
 
 const router = Router();
 
@@ -71,9 +76,18 @@ router.post("/feedback", requireAuth, requireRole(["nguoi_dan"]), async (req, re
 
 /**
  * POST /phan-anh
- * Tạo phản ánh mới liên kết với nhân khẩu (cho cả cán bộ/tổ trưởng/ người dân)
+ * Tạo phản ánh mới liên kết với nhân khẩu.
+ * - Người dân: được tạo
+ * - Cán bộ: chỉ task Kiến nghị
+ * - Tổ trưởng/Tổ phó/Admin: được tạo
  */
-router.post("/phan-anh", requireAuth, async (req, res, next) => {
+router.post(
+  "/phan-anh",
+  requireAuth,
+  requireRoleOrAnyTask(["nguoi_dan", "to_truong", "to_pho", "admin"], [
+    "kiennghi",
+  ]),
+  async (req, res, next) => {
   try {
     const userId = req.user!.id;
     const { tieuDe, noiDung, loai, nhanKhauId } = req.body;
@@ -135,6 +149,7 @@ router.post("/phan-anh", requireAuth, async (req, res, next) => {
   }
 });
 
+
 /**
  * GET /feedback/me
  * Lấy danh sách phản ánh của người dân hiện tại kèm nội dung phản hồi
@@ -166,36 +181,66 @@ router.get("/feedback/me", requireAuth, requireRole(["nguoi_dan"]), async (req, 
  * GET /feedbacks
  * Lấy danh sách phản ánh/kiến nghị (phân trang, lọc trạng thái, phân loại)
  */
-router.get("/feedbacks", requireAuth, feedbackController.list);
+router.get(
+  "/feedbacks",
+  requireAuth,
+  requireAnyTask(["kiennghi"]),
+  feedbackController.list
+);
 
 /**
  * GET /feedbacks/:id
  * Xem chi tiết một phản ánh, kèm danh sách người phản ánh và phản hồi
  */
-router.get("/feedbacks/:id", requireAuth, feedbackController.detail);
+router.get(
+  "/feedbacks/:id",
+  requireAuth,
+  requireAnyTask(["kiennghi"]),
+  feedbackController.detail
+);
 
 /**
  * PATCH /feedbacks/:id/status
  * Cập nhật trạng thái phản ánh (chỉ ADMIN/TỔ TRƯỞNG)
  */
-router.patch("/feedbacks/:id/status", requireAuth, requireRole(["admin", "to_truong"]), feedbackController.updateStatus);
+router.patch(
+  "/feedbacks/:id/status",
+  requireAuth,
+  requireAnyTask(["kiennghi"]),
+  feedbackController.updateStatus
+);
 
 /**
  * POST /feedbacks/:id/response
  * Ghi nhận phản hồi từ cơ quan chức năng (chỉ ADMIN/TỔ TRƯỞNG)
  */
-router.post("/feedbacks/:id/response", requireAuth, requireRole(["admin", "to_truong"]), feedbackController.addResponse);
+router.post(
+  "/feedbacks/:id/response",
+  requireAuth,
+  requireAnyTask(["kiennghi"]),
+  feedbackController.addResponse
+);
 
 /**
  * POST /feedbacks/merge
  * Gộp các phản ánh trùng nhau (chỉ ADMIN/TỔ TRƯỞNG)
  */
-router.post("/feedbacks/merge", requireAuth, requireRole(["admin", "to_truong"]), feedbackController.merge);
+router.post(
+  "/feedbacks/merge",
+  requireAuth,
+  requireAnyTask(["kiennghi"]),
+  feedbackController.merge
+);
 
 /**
  * POST /feedbacks/:id/notify
  * Gửi thông báo cho người dân khi phản ánh có phản hồi hoặc thay đổi trạng thái
  */
-router.post("/feedbacks/:id/notify", requireAuth, requireRole(["admin", "to_truong"]), feedbackController.notify);
+router.post(
+  "/feedbacks/:id/notify",
+  requireAuth,
+  requireAnyTask(["kiennghi"]),
+  feedbackController.notify
+);
 
 export default router;

@@ -11,6 +11,16 @@ export default function Feedbacks() {
   const [responseContent, setResponseContent] = useState("");
   const [responderUnit, setResponderUnit] = useState("Ban quản lý TDP7");
 
+  const [keyword, setKeyword] = useState("");
+  const [reporterKeyword, setReporterKeyword] = useState("");
+  const [status, setStatus] = useState("");
+  const [category, setCategory] = useState("");
+
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyUser, setHistoryUser] = useState<any>(null);
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   useEffect(() => {
     loadFeedbacks();
   }, []);
@@ -18,7 +28,14 @@ export default function Feedbacks() {
   const loadFeedbacks = async () => {
     setIsLoading(true);
     try {
-      const res = await apiService.getAllFeedbacks();
+      const res = await apiService.getAllFeedbacks({
+        page: 1,
+        limit: 50,
+        status: status || undefined,
+        category: category || undefined,
+        keyword: keyword.trim() || undefined,
+        reporterKeyword: reporterKeyword.trim() || undefined,
+      });
       if (res.success) {
         setFeedbacks(res.data || []);
       }
@@ -27,6 +44,31 @@ export default function Feedbacks() {
     } finally {
       setIsLoading(false);
       setSelectedIds([]); 
+    }
+  };
+
+  const openHistory = async (u: any) => {
+    if (!u?.id) return;
+    setHistoryUser(u);
+    setShowHistoryModal(true);
+    setHistoryLoading(true);
+    try {
+      const res = await apiService.getAllFeedbacks({
+        page: 1,
+        limit: 50,
+        userId: Number(u.id),
+        includeMerged: true,
+        keyword: keyword.trim() || undefined,
+      });
+      if (res.success) {
+        setHistoryRows(res.data || []);
+      } else {
+        setHistoryRows([]);
+      }
+    } catch (e) {
+      setHistoryRows([]);
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -48,7 +90,9 @@ export default function Feedbacks() {
           alert("Gộp thành công! Hệ thống đã tối ưu danh sách hiển thị.");
           await loadFeedbacks(); 
         } else {
-          alert("Gộp thất bại: " + (res.message || "Lỗi hệ thống"));
+          alert(
+            "Gộp thất bại: " + ((res as any)?.message || "Lỗi hệ thống")
+          );
         }
       } catch (err) {
         alert("Lỗi khi thực hiện gộp.");
@@ -76,7 +120,9 @@ export default function Feedbacks() {
         setResponseContent("");
         await loadFeedbacks(); 
       } else {
-        alert("Lỗi từ server: " + (res?.message || "Kiểm tra Database/Backend."));
+        alert(
+          "Lỗi từ server: " + ((res as any)?.message || "Kiểm tra Database/Backend.")
+        );
       }
     } catch (err: any) {
       console.error("Lỗi Catch:", err);
@@ -140,6 +186,55 @@ export default function Feedbacks() {
         </div>
       </div>
 
+      <div className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <input
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="Tìm theo tiêu đề / nội dung..."
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          />
+          <input
+            value={reporterKeyword}
+            onChange={(e) => setReporterKeyword(e.target.value)}
+            placeholder="Tìm theo người gửi (tên/username/CCCD)..."
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          />
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          >
+            <option value="">Tất cả trạng thái</option>
+            <option value="cho_xu_ly">Chờ xử lý</option>
+            <option value="dang_xu_ly">Đang xử lý</option>
+            <option value="da_xu_ly">Đã xử lý</option>
+            <option value="tu_choi">Từ chối</option>
+          </select>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          >
+            <option value="">Tất cả chủ đề</option>
+            <option value="co_so_ha_tang">Cơ sở hạ tầng</option>
+            <option value="moi_truong">Môi trường</option>
+            <option value="an_ninh">An ninh</option>
+            <option value="y_te">Y tế</option>
+            <option value="giao_duc">Giáo dục</option>
+            <option value="khac">Khác</option>
+          </select>
+        </div>
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={loadFeedbacks}
+            className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-700"
+          >
+            🔎 Tìm kiếm
+          </button>
+        </div>
+      </div>
+
       {isLoading ? (
         <div className="flex flex-col items-center justify-center p-20">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
@@ -187,12 +282,18 @@ export default function Feedbacks() {
                     <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Người gửi:</span>
                     <div className="flex flex-wrap gap-1.5">
                       {fb.danhSachNguoi && fb.danhSachNguoi.length > 0 ? (
-                        fb.danhSachNguoi.map((name: string, index: number) => (
+                        fb.danhSachNguoi.map((u: any, index: number) => (
                           <span 
                             key={index} 
-                            className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100 shadow-sm"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openHistory(u)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") openHistory(u);
+                            }}
+                            className="inline-flex cursor-pointer items-center px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100 shadow-sm hover:bg-blue-100"
                           >
-                            👤 {name}
+                            👤 {u?.fullName || "(Chưa có tên)"}
                           </span>
                         ))
                       ) : (
@@ -280,6 +381,69 @@ export default function Feedbacks() {
               >
                 Xác nhận phản hồi
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHistoryModal && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full">
+            <div className="p-6 border-b border-gray-50 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Lịch sử phản ánh của người dân</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  {historyUser?.fullName || "(Chưa có tên)"}
+                  {historyUser?.username ? ` • ${historyUser.username}` : ""}
+                  {historyUser?.cccd ? ` • CCCD: ${historyUser.cccd}` : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                className="px-4 py-2 rounded-xl border border-gray-200 text-gray-700 font-semibold hover:bg-gray-50"
+              >
+                Đóng
+              </button>
+            </div>
+
+            <div className="p-6">
+              {historyLoading ? (
+                <div className="flex flex-col items-center justify-center p-10">
+                  <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-600"></div>
+                  <p className="mt-3 text-gray-500 font-medium">Đang tải lịch sử...</p>
+                </div>
+              ) : historyRows.length === 0 ? (
+                <p className="text-gray-500">Không có phản ánh nào.</p>
+              ) : (
+                <div className="overflow-auto rounded-2xl border border-gray-100">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-bold">Tiêu đề</th>
+                        <th className="px-4 py-3 text-left font-bold">Chủ đề</th>
+                        <th className="px-4 py-3 text-left font-bold">Nội dung</th>
+                        <th className="px-4 py-3 text-left font-bold">Ngày tạo</th>
+                        <th className="px-4 py-3 text-left font-bold">Trạng thái</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historyRows.map((r) => (
+                        <tr key={r.id} className="border-t border-gray-100">
+                          <td className="px-4 py-3 font-semibold text-gray-900">{r.tieuDe}</td>
+                          <td className="px-4 py-3 text-gray-600">{r.loai}</td>
+                          <td className="px-4 py-3 text-gray-600 max-w-[420px]">
+                            <div className="line-clamp-2">{r.noiDung}</div>
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {r.ngayTao ? new Date(r.ngayTao).toLocaleDateString("vi-VN") : ""}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">{r.trangThai}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         </div>

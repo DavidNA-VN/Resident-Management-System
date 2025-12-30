@@ -9,7 +9,12 @@ export type TaskCode =
   | "thongke"
   | "kiennghi";
 
-export type RoleCode = "to_truong" | "to_pho" | "can_bo" | "nguoi_dan";
+export type RoleCode =
+  | "admin"
+  | "to_truong"
+  | "to_pho"
+  | "can_bo"
+  | "nguoi_dan";
 
 export type AuthUser = {
   id: number;
@@ -18,6 +23,17 @@ export type AuthUser = {
   task: TaskCode | null;
   personId?: number | null;
 };
+
+const taskLabels: Record<TaskCode, string> = {
+  hokhau_nhankhau: "Hộ khẩu / Nhân khẩu",
+  tamtru_tamvang: "Tạm trú / Tạm vắng",
+  thongke: "Thống kê",
+  kiennghi: "Phản ánh / Kiến nghị",
+};
+
+function normalizeTaskRequired(taskRequired: TaskCode | TaskCode[]): TaskCode[] {
+  return Array.isArray(taskRequired) ? taskRequired : [taskRequired];
+}
 
 declare global {
   namespace Express {
@@ -130,7 +146,7 @@ export const requireRole = (roles: RoleCode[]) => {
     if (!roles.includes(user.role)) {
       return res.status(403).json({
         success: false,
-        error: { code: "FORBIDDEN", message: "Role not allowed" },
+        error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập" },
       });
     }
 
@@ -145,7 +161,7 @@ export const requireRole = (roles: RoleCode[]) => {
  * - role khác: chặn
  * Lưu ý: phải đặt sau requireAuth
  */
-export const requireTask = (taskRequired: TaskCode) => {
+export const requireAnyTask = (taskRequired: TaskCode | TaskCode[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const user = req.user;
 
@@ -156,20 +172,23 @@ export const requireTask = (taskRequired: TaskCode) => {
       });
     }
 
-    // Tổ trưởng / tổ phó: full quyền
-    if (user.role === "to_truong" || user.role === "to_pho") {
+    // Admin / Tổ trưởng / Tổ phó: full quyền
+    if (user.role === "admin" || user.role === "to_truong" || user.role === "to_pho") {
       return next();
     }
 
     // Cán bộ: đúng task mới được thao tác
     if (user.role === "can_bo") {
-      if (user.task === taskRequired) return next();
+      const required = normalizeTaskRequired(taskRequired);
+      if (user.task && required.includes(user.task)) return next();
 
       return res.status(403).json({
         success: false,
         error: {
           code: "FORBIDDEN",
-          message: `Not allowed for task '${taskRequired}'`,
+          message: `Bạn không được phân công xử lý chức năng này (yêu cầu tác vụ: ${required
+            .map((t) => taskLabels[t] || t)
+            .join(" hoặc ")}).`,
         },
       });
     }
@@ -177,7 +196,40 @@ export const requireTask = (taskRequired: TaskCode) => {
     // Người dân / role khác: chặn
     return res.status(403).json({
       success: false,
-      error: { code: "FORBIDDEN", message: "Permission denied" },
+      error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập" },
+    });
+  };
+};
+
+/**
+ * Backward-compatible: require a single task.
+ */
+export const requireTask = (taskRequired: TaskCode) => requireAnyTask(taskRequired);
+
+/**
+ * Allow if role is in `roles` OR (user is can_bo and task in `tasks`).
+ * Admin/to_truong/to_pho will pass if included in roles (recommended).
+ */
+export const requireRoleOrAnyTask = (roles: RoleCode[], tasks: TaskCode[]) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = req.user;
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: { code: "UNAUTHORIZED", message: "Missing auth" },
+      });
+    }
+
+    if (roles.includes(user.role)) return next();
+
+    if (user.role === "can_bo" && user.task && tasks.includes(user.task)) {
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      error: { code: "FORBIDDEN", message: "Bạn không có quyền truy cập" },
     });
   };
 };

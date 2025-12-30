@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { apiService } from "../services/api";
 import { formatFromYMD } from "../utils/date";
 
@@ -54,7 +54,7 @@ export default function TamTruVangDetailModal({ requestId, isOpen, onClose, onRe
     setIsSubmitting(true);
     setError(null);
     try {
-      const resp = await apiService.approveTamTruTamVangRequest(requestId);
+      const resp = await apiService.approveTamTruVangRequest(requestId);
       if (resp.success) {
         setSuccess("Duyệt yêu cầu thành công");
         onRefresh?.();
@@ -75,7 +75,10 @@ export default function TamTruVangDetailModal({ requestId, isOpen, onClose, onRe
     setIsSubmitting(true);
     setError(null);
     try {
-      const resp = await apiService.rejectTamTruTamVangRequest(requestId, rejectReason.trim());
+      const resp = await apiService.rejectTamTruVangRequest(
+        requestId,
+        rejectReason.trim()
+      );
       if (resp.success) {
         setSuccess("Từ chối yêu cầu thành công");
         setShowRejectModal(false);
@@ -172,8 +175,18 @@ export default function TamTruVangDetailModal({ requestId, isOpen, onClose, onRe
                   </div>
                 </div>
                 <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ</label>
-                  <p className="text-sm text-gray-900">{requestDetail.payload?.diaChi || requestDetail.diaChi || "-"}</p>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {String(requestDetail.type || "").toLowerCase().includes("residence") ||
+                    String(requestDetail.type || "").toLowerCase().includes("tam_tru")
+                      ? "Số hộ khẩu"
+                      : "Địa chỉ"}
+                  </label>
+                  <p className="text-sm text-gray-900">
+                    {requestDetail.payload?.soHoKhau ||
+                      requestDetail.payload?.diaChi ||
+                      requestDetail.diaChi ||
+                      "-"}
+                  </p>
                 </div>
               </div>
 

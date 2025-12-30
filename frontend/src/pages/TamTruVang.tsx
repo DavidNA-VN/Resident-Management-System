@@ -68,25 +68,6 @@ const formatDateRange = (tuNgay?: string, denNgay?: string): string => {
 const normalizeType = (type?: string) => (type || "").toUpperCase();
 const normalizeStatus = (status?: string) => (status || "").toUpperCase();
 
-const isTamTruVangType = (type?: string) => {
-  const normalized = normalizeType(type);
-  return [
-    "TAM_TRU",
-    "TEMPORARY_RESIDENCE",
-    "TAM_VANG",
-    "TEMPORARY_ABSENCE",
-  ].includes(normalized);
-};
-
-const parseYMDToDate = (value?: string) => {
-  if (!value) return null;
-  const parts = value.split("-");
-  if (parts.length !== 3) return null;
-  const [y, m, d] = parts.map((p) => parseInt(p, 10));
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d, 12, 0, 0);
-};
-
 const getDateFromPayload = (item: RequestItem, key: "tuNgay" | "denNgay") => {
   return item?.payload?.[key] || (item as any)[key] || null;
 };

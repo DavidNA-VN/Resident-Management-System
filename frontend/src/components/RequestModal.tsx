@@ -1,11 +1,15 @@
-import { FormEvent, useState, useEffect, useRef } from "react";
+import { FormEvent, useState, useEffect, useRef, KeyboardEvent } from "react";
 
 export type RequestType =
+  | "ADD_PERSON"
+  | "ADD_NEWBORN"
   | "TAM_VANG"
   | "TAM_TRU"
   | "TACH_HO_KHAU"
   | "SUA_NHAN_KHAU"
+  | "UPDATE_PERSON"
   | "XOA_NHAN_KHAU"
+  | "MOVE_OUT"
   | "DECEASED";
 
 // Focus the modal for keyboard accessibility
@@ -15,16 +19,26 @@ interface RequestModalProps {
   type: RequestType | null;
   onClose: () => void;
   onSubmit: (data: any) => Promise<void>;
-  nhanKhauList?: Array<{ id: number; hoTen: string }>;
+  nhanKhauList?: Array<{
+    id: number;
+    hoTen: string;
+    cccd?: string | null;
+    ngayCapCCCD?: string | null;
+    noiCapCCCD?: string | null;
+  }>;
   householdInfo?: { soHoKhau: string; diaChi: string };
 }
 
 const requestTypeLabels: Record<RequestType, string> = {
+  ADD_PERSON: "Thêm nhân khẩu",
+  ADD_NEWBORN: "Thêm con sơ sinh",
   TAM_VANG: "Xin tạm vắng",
   TAM_TRU: "Xin tạm trú",
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
   SUA_NHAN_KHAU: "Sửa thông tin nhân khẩu",
+  UPDATE_PERSON: "Sửa thông tin nhân khẩu",
   XOA_NHAN_KHAU: "Xoá nhân khẩu",
+  MOVE_OUT: "Xác nhận chuyển đi",
   DECEASED: "Xác nhận qua đời",
 };
 
@@ -39,6 +53,18 @@ export default function RequestModal({
   const [formData, setFormData] = useState<any>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Legacy UI type: treat SUA_NHAN_KHAU as UPDATE_PERSON (MOVE_OUT/DECEASED are separate operations now)
+  const submitType: RequestType | null =
+    type === "SUA_NHAN_KHAU" ? "UPDATE_PERSON" : type;
+
+  const selectedNhanKhau =
+    submitType === "UPDATE_PERSON" && formData?.nhanKhauId
+      ? nhanKhauList.find((nk) => Number(nk.id) === Number(formData.nhanKhauId))
+      : null;
+  const selectedNhanKhauCccd = String(selectedNhanKhau?.cccd ?? "").trim();
+  const canEditCccd =
+    submitType === "UPDATE_PERSON" && !!selectedNhanKhau && selectedNhanKhauCccd === "";
 
   useEffect(() => {
     if (isOpen && type) {
@@ -62,7 +88,8 @@ export default function RequestModal({
             noiLamViec: "",
             ghiChu: "",
           },
-          diaChi: "",
+          // diaChi is kept for backward compatibility but now carries soHoKhau
+          diaChi: householdInfo?.soHoKhau || "",
           tuNgay: "",
           denNgay: "",
           lyDo: "",
@@ -72,7 +99,17 @@ export default function RequestModal({
       }
       setError(null);
     }
-  }, [isOpen, type]);
+  }, [isOpen, type, householdInfo?.soHoKhau]);
+
+  // If householdInfo arrives after opening, backfill the fixed soHoKhau
+  useEffect(() => {
+    if (!isOpen || type !== "TAM_TRU") return;
+    const soHoKhau = householdInfo?.soHoKhau;
+    if (!soHoKhau) return;
+    if (!formData?.diaChi || String(formData.diaChi).trim() === "") {
+      setFormData((prev: any) => ({ ...prev, diaChi: soHoKhau }));
+    }
+  }, [isOpen, type, householdInfo?.soHoKhau, formData?.diaChi]);
 
   // Accessibility: focus modal container when opened
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -83,22 +120,44 @@ export default function RequestModal({
     }
   }, [isOpen]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  // Keep key handling typed without requiring React namespace import
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       onClose();
     }
   };
 
+  // When choosing a person for UPDATE_PERSON, prefill CCCD fields for display.
+  // (Editable only when current CCCD is empty.)
+  useEffect(() => {
+    if (!isOpen) return;
+    if (submitType !== "UPDATE_PERSON") return;
+    const nhanKhauId = Number(formData?.nhanKhauId);
+    if (!nhanKhauId) return;
+    const nk = nhanKhauList.find((x) => Number(x.id) === nhanKhauId);
+    if (!nk) return;
+    setFormData((prev: any) => ({
+      ...prev,
+      cccd: nk.cccd ?? "",
+      ngayCapCCCD: nk.ngayCapCCCD ?? "",
+      noiCapCCCD: nk.noiCapCCCD ?? "",
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, submitType, formData?.nhanKhauId]);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
+    if (!submitType) return;
+
     // Validate
     if (
-      type === "TAM_VANG" ||
-      type === "SUA_NHAN_KHAU" ||
-      type === "XOA_NHAN_KHAU" ||
-      type === "DECEASED"
+      submitType === "TAM_VANG" ||
+      submitType === "UPDATE_PERSON" ||
+      submitType === "XOA_NHAN_KHAU" ||
+      submitType === "DECEASED" ||
+      submitType === "MOVE_OUT"
     ) {
       if (!formData.nhanKhauId) {
         setError("Vui lòng chọn nhân khẩu");
@@ -106,7 +165,7 @@ export default function RequestModal({
       }
     }
 
-    if (type === "TAM_TRU") {
+    if (submitType === "TAM_TRU") {
       const person = formData.person || {};
       const requiredPersonFields = [
         "hoTen",
@@ -124,13 +183,14 @@ export default function RequestModal({
         );
         return;
       }
-      if (!formData.diaChi || String(formData.diaChi).trim() === "") {
-        setError("Vui lòng nhập địa chỉ tạm trú");
+      // Fixed household code (soHoKhau) is required and comes from householdInfo
+      if (!householdInfo?.soHoKhau || String(householdInfo.soHoKhau).trim() === "") {
+        setError("Không lấy được số hộ khẩu của hộ hiện tại");
         return;
       }
     }
 
-    if (type === "DECEASED") {
+    if (submitType === "DECEASED") {
       if (!formData.ngayMat) {
         setError("Vui lòng nhập ngày mất");
         return;
@@ -141,7 +201,18 @@ export default function RequestModal({
       }
     }
 
-    if (type === "TAM_VANG" || type === "TAM_TRU") {
+    if (submitType === "MOVE_OUT") {
+      if (!formData.ngayChuyen) {
+        setError("Vui lòng nhập ngày chuyển đi");
+        return;
+      }
+      if (!formData.lyDo || String(formData.lyDo).trim() === "") {
+        setError("Vui lòng nhập lý do/ghi chú");
+        return;
+      }
+    }
+
+    if (submitType === "TAM_VANG" || submitType === "TAM_TRU") {
       if (!formData.tuNgay) {
         setError("Vui lòng chọn từ ngày");
         return;
@@ -149,10 +220,11 @@ export default function RequestModal({
     }
 
     if (
-      type === "TAM_VANG" ||
-      type === "TAM_TRU" ||
-      type === "SUA_NHAN_KHAU" ||
-      type === "XOA_NHAN_KHAU"
+      submitType === "TAM_VANG" ||
+      submitType === "TAM_TRU" ||
+      submitType === "UPDATE_PERSON" ||
+      submitType === "XOA_NHAN_KHAU" ||
+      submitType === "MOVE_OUT"
     ) {
       if (!formData.lyDo || formData.lyDo.trim() === "") {
         setError("Vui lòng nhập lý do");
@@ -160,11 +232,64 @@ export default function RequestModal({
       }
     }
 
+    if (submitType === "UPDATE_PERSON") {
+      // Allow CCCD updates ONLY when this person currently has no CCCD (e.g., newborn)
+      const changedKeys = [
+        "hoTen",
+        "biDanh",
+        "ngaySinh",
+        "gioiTinh",
+        "noiSinh",
+        "nguyenQuan",
+        "danToc",
+        "tonGiao",
+        "quocTich",
+        ...(canEditCccd ? ["cccd", "ngayCapCCCD", "noiCapCCCD"] : []),
+        "quanHe",
+        "ngayDangKyThuongTru",
+        "diaChiThuongTruTruoc",
+        "ngheNghiep",
+        "noiLamViec",
+        "ghiChu",
+        "ghiChuHoKhau",
+        "lyDoKhongCoCCCD",
+      ];
+      const hasChange = changedKeys.some((k) => {
+        const v = formData?.[k];
+        if (v === null || v === undefined) return false;
+        return String(v).trim() !== "";
+      });
+      if (!hasChange) {
+        setError("Vui lòng nhập ít nhất một thông tin cần sửa");
+        return;
+      }
+
+      if (canEditCccd) {
+        const cccd = String(formData?.cccd ?? "").trim();
+        const hasAnyCccdField =
+          cccd !== "" ||
+          String(formData?.ngayCapCCCD ?? "").trim() !== "" ||
+          String(formData?.noiCapCCCD ?? "").trim() !== "";
+        if (hasAnyCccdField && cccd === "") {
+          setError("Vui lòng nhập CCCD/CMND");
+          return;
+        }
+      }
+    }
+
     setIsSubmitting(true);
     try {
+      const safePayload =
+        submitType === "UPDATE_PERSON"
+          ? (() => {
+              if (canEditCccd) return formData;
+              const { cccd, ngayCapCCCD, noiCapCCCD, ...rest } = formData || {};
+              return rest;
+            })()
+          : formData;
       await onSubmit({
-        type,
-        payload: formData,
+        type: submitType,
+        payload: safePayload,
       });
       // Reset form sau khi submit thành công
       setFormData({});
@@ -199,7 +324,7 @@ export default function RequestModal({
             id="request-modal-title"
             className="text-2xl font-bold text-gray-900"
           >
-            {requestTypeLabels[type]}
+            {requestTypeLabels[submitType || type]}
           </h2>
           <button
             onClick={onClose}
@@ -651,16 +776,13 @@ export default function RequestModal({
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Địa chỉ tạm trú <span className="text-red-500">*</span>
+                  Số hộ khẩu <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
-                  value={formData.diaChi || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, diaChi: e.target.value })
-                  }
+                  value={householdInfo?.soHoKhau || formData.diaChi || ""}
+                  readOnly
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="Nhập địa chỉ tạm trú..."
                   required
                 />
               </div>
@@ -788,6 +910,83 @@ export default function RequestModal({
             </>
           )}
 
+          {type === "MOVE_OUT" && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Chọn nhân khẩu cần xác nhận chuyển đi{" "}
+                  <span className="text-red-500">*</span>
+                </label>
+                <select
+                  autoFocus
+                  value={formData.nhanKhauId || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      nhanKhauId: Number(e.target.value),
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  required
+                >
+                  <option value="">-- Chọn nhân khẩu --</option>
+                  {nhanKhauList.map((nk) => (
+                    <option key={nk.id} value={nk.id}>
+                      {nk.hoTen}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ngày chuyển đi <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.ngayChuyen || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, ngayChuyen: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nơi đến (nếu có)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.noiDen || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, noiDen: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    placeholder="Nhập địa chỉ/địa điểm chuyển đến"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Ghi chú/Lý do <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={formData.lyDo || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, lyDo: e.target.value })
+                  }
+                  rows={3}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Mô tả ngắn gọn lý do chuyển đi, giấy tờ kèm theo nếu có"
+                  required
+                />
+              </div>
+            </>
+          )}
+
           {/* SUA_NHAN_KHAU */}
           {type === "SUA_NHAN_KHAU" && (
             <>
@@ -815,6 +1014,8 @@ export default function RequestModal({
                   ))}
                 </select>
               </div>
+
+              {/* Full person fields (fill only the fields you want to update) */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -832,23 +1033,92 @@ export default function RequestModal({
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    CCCD/CMND mới
+                    Bí danh
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.biDanh || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, biDanh: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    placeholder="Nhập bí danh (nếu có)"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    CCCD/CMND
                   </label>
                   <input
                     type="text"
                     value={formData.cccd || ""}
+                    disabled={!canEditCccd}
                     onChange={(e) =>
                       setFormData({ ...formData, cccd: e.target.value })
                     }
-                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    placeholder="Nhập CCCD/CMND mới..."
+                    className={
+                      canEditCccd
+                        ? "w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        : "w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-500"
+                    }
+                    placeholder={
+                      canEditCccd
+                        ? "Nhập CCCD/CMND (chỉ áp dụng khi nhân khẩu chưa có CCCD)"
+                        : "Không thể sửa CCCD/CMND"
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ngày cấp CCCD/CMND
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.ngayCapCCCD || ""}
+                    disabled={!canEditCccd}
+                    onChange={(e) =>
+                      setFormData({ ...formData, ngayCapCCCD: e.target.value })
+                    }
+                    className={
+                      canEditCccd
+                        ? "w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        : "w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-500"
+                    }
                   />
                 </div>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Nơi cấp CCCD/CMND
+                </label>
+                <input
+                  type="text"
+                  value={formData.noiCapCCCD || ""}
+                  disabled={!canEditCccd}
+                  onChange={(e) =>
+                    setFormData({ ...formData, noiCapCCCD: e.target.value })
+                  }
+                  className={
+                    canEditCccd
+                      ? "w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      : "w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-500"
+                  }
+                  placeholder={
+                    canEditCccd
+                      ? "Nhập nơi cấp CCCD/CMND"
+                      : "Không thể sửa thông tin cấp CCCD/CMND"
+                  }
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Ngày sinh mới
+                    Ngày sinh
                   </label>
                   <input
                     type="date"
@@ -861,7 +1131,7 @@ export default function RequestModal({
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Giới tính mới
+                    Giới tính
                   </label>
                   <select
                     value={formData.gioiTinh || ""}
@@ -877,9 +1147,214 @@ export default function RequestModal({
                   </select>
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nơi sinh
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.noiSinh || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, noiSinh: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    placeholder="Nhập nơi sinh"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nguyên quán
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.nguyenQuan || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, nguyenQuan: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    placeholder="Nhập nguyên quán"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Dân tộc
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.danToc || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, danToc: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Tôn giáo
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.tonGiao || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, tonGiao: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Quốc tịch
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.quocTich || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, quocTich: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Quan hệ trong hộ
+                  </label>
+                  <select
+                    value={formData.quanHe || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, quanHe: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="">-- Chọn quan hệ --</option>
+                    <option value="chu_ho">Chủ hộ</option>
+                    <option value="vo_chong">Vợ/Chồng</option>
+                    <option value="con">Con</option>
+                    <option value="cha_me">Cha/Mẹ</option>
+                    <option value="anh_chi_em">Anh/Chị/Em</option>
+                    <option value="ong_ba">Ông/Bà</option>
+                    <option value="chau">Cháu</option>
+                    <option value="khac">Khác</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ngày đăng ký thường trú
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.ngayDangKyThuongTru || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        ngayDangKyThuongTru: e.target.value,
+                      })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Lý do sửa <span className="text-red-500">*</span>
+                  Địa chỉ thường trú trước
+                </label>
+                <input
+                  type="text"
+                  value={formData.diaChiThuongTruTruoc || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      diaChiThuongTruTruoc: e.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nghề nghiệp
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.ngheNghiep || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, ngheNghiep: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nơi làm việc
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.noiLamViec || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, noiLamViec: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ghi chú
+                  </label>
+                  <textarea
+                    value={formData.ghiChu || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, ghiChu: e.target.value })
+                    }
+                    rows={3}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ghi chú hộ khẩu
+                  </label>
+                  <textarea
+                    value={formData.ghiChuHoKhau || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, ghiChuHoKhau: e.target.value })
+                    }
+                    rows={3}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Lý do không có CCCD
+                </label>
+                <input
+                  type="text"
+                  value={formData.lyDoKhongCoCCCD || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, lyDoKhongCoCCCD: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Lý do sửa{" "}
+                  <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   value={formData.lyDo || ""}

@@ -1,16 +1,16 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import Layout from "./components/Layout";
-import CitizenLayout from "./components/CitizenLayout";
-import ProtectedRoute from "./components/ProtectedRoute";
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import HoKhau from "./pages/HoKhau";
-import NhanKhau from "./pages/NhanKhau";
-import CitizenHome from "./pages/citizen/Home";
-import YeuCau from "./pages/citizen/YeuCau";
-import PhanAnh from "./pages/citizen/PhanAnh";
+import Layout from "./components/Layout.tsx";
+import CitizenLayout from "./components/CitizenLayout.tsx";
+import ProtectedRoute from "./components/ProtectedRoute.tsx";
+import Login from "./pages/Login.tsx";
+import Dashboard from "./pages/Dashboard.tsx";
+import HoKhau from "./pages/HoKhau.tsx";
+import NhanKhau from "./pages/NhanKhau.tsx";
+import CitizenHome from "./pages/citizen/Home.tsx";
+import YeuCau from "./pages/citizen/YeuCau.tsx";
+import PhanAnh from "./pages/citizen/PhanAnh.tsx";
 import Requests from "./pages/Requests";
-import TamTruTamVangRequests from "./pages/TamTruTamVangRequests";
+import TamTruTamVangRequests from "./pages/TamTruTamVangRequests.tsx";
 import Feedbacks from "./pages/Feedbacks";
 import ThongKe from "./pages/ThongKe";
 function App() {
@@ -31,7 +31,10 @@ function App() {
         <Route
           path="/ho-khau"
           element={
-            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
+            <ProtectedRoute
+              allowedRoles={["to_truong", "to_pho", "can_bo"]}
+              allowedTasks={["hokhau_nhankhau"]}
+            >
               <Layout>
                 <HoKhau />
               </Layout>
@@ -41,7 +44,10 @@ function App() {
         <Route
           path="/nhan-khau"
           element={
-            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
+            <ProtectedRoute
+              allowedRoles={["to_truong", "to_pho", "can_bo"]}
+              allowedTasks={["hokhau_nhankhau"]}
+            >
               <Layout>
                 <NhanKhau />
               </Layout>
@@ -51,7 +57,10 @@ function App() {
         <Route
           path="/requests"
           element={
-            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
+            <ProtectedRoute
+              allowedRoles={["to_truong", "to_pho", "can_bo"]}
+              allowedTasks={["hokhau_nhankhau", "tamtru_tamvang"]}
+            >
               <Layout>
                 <Requests />
               </Layout>
@@ -61,22 +70,16 @@ function App() {
         <Route
           path="/bien-dong"
           element={
-            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
-              <Layout>
-                <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
-                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                    Biến động Nhân khẩu
-                  </h1>
-                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
-                </div>
-              </Layout>
-            </ProtectedRoute>
+            <Navigate to="/dashboard" replace />
           }
         />
         <Route
           path="/tam-tru-vang"
           element={
-            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
+            <ProtectedRoute
+              allowedRoles={["to_truong", "to_pho", "can_bo"]}
+              allowedTasks={["hokhau_nhankhau", "tamtru_tamvang"]}
+            >
               <Layout>
                 <TamTruTamVangRequests />
               </Layout>
@@ -86,7 +89,10 @@ function App() {
         <Route
           path="/phan-anh"
           element={
-            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
+            <ProtectedRoute
+              allowedRoles={["to_truong", "to_pho", "can_bo"]}
+              allowedTasks={["kiennghi"]}
+            >
               <Layout>
                 <Feedbacks />
               </Layout>
@@ -96,7 +102,10 @@ function App() {
         <Route
   path="/thong-ke"
   element={
-    <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
+    <ProtectedRoute
+      allowedRoles={["to_truong", "to_pho", "can_bo"]}
+      allowedTasks={["thongke"]}
+    >
       <Layout>
         <ThongKe /> 
       </Layout>
@@ -106,14 +115,12 @@ function App() {
         <Route
           path="/bao-cao"
           element={
-            <ProtectedRoute allowedRoles={["to_truong", "to_pho", "can_bo"]}>
+            <ProtectedRoute
+              allowedRoles={["to_truong", "to_pho", "can_bo"]}
+              allowedTasks={["thongke"]}
+            >
               <Layout>
-                <div className="rounded-xl border border-gray-200/80 bg-white p-8 shadow-sm">
-                  <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-                    Báo cáo
-                  </h1>
-                  <p className="mt-2 text-gray-600">Trang này đang được phát triển...</p>
-                </div>
+                <ThongKe />
               </Layout>
             </ProtectedRoute>
           }

@@ -13,6 +13,7 @@ interface Household {
   diaChi: string;
   diaChiDayDu?: string;
   chuHo?: {
+    id?: number;
     hoTen: string;
     cccd?: string;
   };
@@ -31,6 +32,7 @@ export interface SplitHouseholdRequestData {
   hoKhauId: number;
   selectedNhanKhauIds: number[];
   newChuHoId: number;
+  oldHouseholdNewChuHoId?: number;
   newAddress: string;
   expectedDate: string;
   reason: string;
@@ -58,12 +60,27 @@ export default function SplitHouseholdRequestModal({
 }: SplitHouseholdRequestModalProps) {
   const [selectedNhanKhauIds, setSelectedNhanKhauIds] = useState<number[]>([]);
   const [newChuHoId, setNewChuHoId] = useState<number | null>(null);
+  const [oldHouseholdNewChuHoId, setOldHouseholdNewChuHoId] = useState<
+    number | null
+  >(null);
   const [newAddress, setNewAddress] = useState("");
   const [expectedDate, setExpectedDate] = useState("");
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const currentChuHoId =
+    (nhanKhauList.find((nk) => nk.quanHe === "chu_ho")?.id ??
+      (household as any)?.chuHo?.id) ||
+    null;
+
+  const isSplittingCurrentChuHo =
+    currentChuHoId !== null && selectedNhanKhauIds.includes(currentChuHoId);
+
+  const remainingNhanKhau = nhanKhauList.filter(
+    (nk) => !selectedNhanKhauIds.includes(nk.id)
+  );
 
   // Focus container and reset form khi mở/đóng modal
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -72,6 +89,7 @@ export default function SplitHouseholdRequestModal({
       setTimeout(() => modalRef.current?.focus(), 0);
       setSelectedNhanKhauIds([]);
       setNewChuHoId(null);
+      setOldHouseholdNewChuHoId(null);
       setNewAddress("");
       setExpectedDate("");
       setReason("");
@@ -79,6 +97,23 @@ export default function SplitHouseholdRequestModal({
       setErrors({});
     }
   }, [isOpen]);
+
+  // If selection changes and the chosen replacement head is no longer valid, reset it
+  useEffect(() => {
+    if (!isSplittingCurrentChuHo) {
+      if (oldHouseholdNewChuHoId !== null) {
+        setOldHouseholdNewChuHoId(null);
+      }
+      return;
+    }
+
+    if (
+      oldHouseholdNewChuHoId !== null &&
+      selectedNhanKhauIds.includes(oldHouseholdNewChuHoId)
+    ) {
+      setOldHouseholdNewChuHoId(null);
+    }
+  }, [isSplittingCurrentChuHo, oldHouseholdNewChuHoId, selectedNhanKhauIds]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -121,6 +156,13 @@ export default function SplitHouseholdRequestModal({
       newErrors.newChuHo = "Vui lòng chọn chủ hộ mới";
     }
 
+    if (isSplittingCurrentChuHo && remainingNhanKhau.length > 0) {
+      if (!oldHouseholdNewChuHoId) {
+        newErrors.oldHouseholdNewChuHo =
+          "Vui lòng chọn chủ hộ thay thế cho hộ khẩu cũ";
+      }
+    }
+
     if (!newAddress || newAddress.trim() === "") {
       newErrors.newAddress = "Vui lòng nhập địa chỉ hộ khẩu mới";
     }
@@ -150,6 +192,10 @@ export default function SplitHouseholdRequestModal({
         hoKhauId: household.id,
         selectedNhanKhauIds,
         newChuHoId: newChuHoId!,
+        oldHouseholdNewChuHoId:
+          isSplittingCurrentChuHo && remainingNhanKhau.length > 0
+            ? oldHouseholdNewChuHoId || undefined
+            : undefined,
         newAddress: newAddress.trim(),
         expectedDate,
         reason: reason.trim(),
@@ -329,6 +375,37 @@ export default function SplitHouseholdRequestModal({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {/* C2. Chọn chủ hộ thay thế cho hộ khẩu cũ (chỉ khi tách chủ hộ ra) */}
+          {isSplittingCurrentChuHo && remainingNhanKhau.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                C2. Chọn chủ hộ thay thế cho hộ khẩu cũ{" "}
+                <span className="text-red-500">*</span>
+              </label>
+              {errors.oldHouseholdNewChuHo && (
+                <p className="text-sm text-red-600 mb-2">
+                  {errors.oldHouseholdNewChuHo}
+                </p>
+              )}
+              <select
+                value={oldHouseholdNewChuHoId || ""}
+                onChange={(e) => setOldHouseholdNewChuHoId(Number(e.target.value))}
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option value="">-- Chọn chủ hộ thay thế --</option>
+                {remainingNhanKhau.map((nk) => (
+                  <option key={nk.id} value={nk.id}>
+                    {nk.hoTen} {nk.cccd && `(${nk.cccd})`}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-gray-500">
+                Vì bạn đang tách chủ hộ ra khỏi hộ khẩu gốc, cần chọn một người
+                khác làm chủ hộ thay thế.
+              </p>
             </div>
           )}
 

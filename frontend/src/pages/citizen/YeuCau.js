@@ -125,26 +125,28 @@ export default function YeuCau() {
     const handleSubmitRequest = async (data) => {
         // Map UI type to backend enum
         const typeMapping = {
-            "TAM_TRU": "TEMPORARY_RESIDENCE",
-            "TAM_VANG": "TEMPORARY_ABSENCE",
-            "TACH_HO_KHAU": "TACH_HO_KHAU",
-            "SUA_NHAN_KHAU": "SUA_NHAN_KHAU",
-            "XOA_NHAN_KHAU": "XOA_NHAN_KHAU",
+            TAM_TRU: "TEMPORARY_RESIDENCE",
+            TAM_VANG: "TEMPORARY_ABSENCE",
+            TACH_HO_KHAU: "SPLIT_HOUSEHOLD",
+            SUA_NHAN_KHAU: "UPDATE_PERSON",
+            DECEASED: "DECEASED",
+            MOVE_OUT: "MOVE_OUT",
         };
         const backendType = typeMapping[data.type] || data.type;
-        // Debug log (temporary) - show endpoint & body before sending
-        try {
-            console.log("[FE] Sending request to /requests", {
-                endpoint: `${(import.meta.env.VITE_API_URL || "http://localhost:3000")}/requests`,
-                body: { type: backendType, payload: data.payload },
-            });
-        }
-        catch (e) {
-            // ignore
-        }
+        const targetPersonId = (data.payload?.nhanKhauId || data.payload?.targetPersonId || null);
         const response = await apiService.createRequest({
             type: backendType,
             payload: data.payload,
+            targetHouseholdId: backendType === "TEMPORARY_RESIDENCE" || backendType === "TEMPORARY_ABSENCE"
+                ? householdInfo?.id
+                : undefined,
+            targetPersonId: backendType === "TEMPORARY_RESIDENCE" ||
+                backendType === "TEMPORARY_ABSENCE" ||
+                backendType === "DECEASED" ||
+                backendType === "MOVE_OUT" ||
+                backendType === "UPDATE_PERSON"
+                ? (targetPersonId || undefined)
+                : undefined,
         });
         if (response.success) {
             setSuccess("Gửi yêu cầu thành công!");
@@ -261,7 +263,6 @@ export default function YeuCau() {
         { type: "TAM_TRU", label: "Xin tạm trú", icon: "🏠" },
         { type: "TACH_HO_KHAU", label: "Yêu cầu tách hộ khẩu", icon: "🔄" },
         { type: "SUA_NHAN_KHAU", label: "Sửa thông tin nhân khẩu", icon: "✏️" },
-        { type: "XOA_NHAN_KHAU", label: "Xoá nhân khẩu", icon: "🗑️" },
     ];
     return (_jsxs("div", { className: "space-y-6", children: [_jsxs("div", { className: "rounded-xl border border-blue-200/60 bg-gradient-to-r from-blue-50 via-cyan-50 to-teal-50 p-6 shadow-sm backdrop-blur-sm", children: [_jsx("h1", { className: "text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent", children: "T\u1EA1o y\u00EAu c\u1EA7u" }), _jsx("p", { className: "mt-2 text-gray-600", children: "Ch\u1ECDn lo\u1EA1i y\u00EAu c\u1EA7u b\u1EA1n mu\u1ED1n g\u1EEDi \u0111\u1EBFn t\u1ED5 d\u00E2n ph\u1ED1" })] }), success && (_jsx("div", { className: "rounded-lg bg-green-50 border border-green-200 p-4 text-green-700", children: success })), _jsx("div", { className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4", children: requestTypes.map((item) => (_jsxs("button", { onClick: () => {
                         if (item.type === "ADD_NEWBORN") {

@@ -2,8 +2,6 @@ import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiService, RegisterRequest } from "../services/api";
 
-type RoleKey = "to_truong" | "to_pho" | "can_bo" | "nguoi_dan";
-type TaskKey = "hokhau_nhankhau" | "tamtru_tamvang" | "thongke" | "kiennghi";
 type ModalType = "login" | "register" | null;
 
 const inputBaseClasses =
@@ -22,8 +20,6 @@ export default function Login() {
     username: "",
     password: "",
     fullName: "",
-    role: "nguoi_dan",
-    task: undefined,
   });
   const [confirmPassword, setConfirmPassword] = useState("");
 
@@ -73,15 +69,15 @@ export default function Login() {
       return;
     }
 
-    if (registerForm.role === "can_bo" && !registerForm.task) {
-      setError("Vui lòng chọn nhiệm vụ cho cán bộ");
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
-      const response = await apiService.register(registerForm);
+      // Registration is for citizens only; backend enforces role = 'nguoi_dan'
+      const response = await apiService.register({
+        username: registerForm.username,
+        password: registerForm.password,
+        fullName: registerForm.fullName,
+      });
       if (response.success) {
         setModalType("login");
         setError(null);
@@ -91,8 +87,6 @@ export default function Login() {
           username: "",
           password: "",
           fullName: "",
-          role: "nguoi_dan",
-          task: undefined,
         });
         setConfirmPassword("");
       }
@@ -110,20 +104,6 @@ export default function Login() {
     setIsSubmitting(false);
     setError(null);
   };
-
-  const roleOptions: Array<{ key: RoleKey; label: string }> = [
-    { key: "to_truong", label: "Tổ trưởng" },
-    { key: "to_pho", label: "Tổ phó" },
-    { key: "can_bo", label: "Cán bộ" },
-    { key: "nguoi_dan", label: "Người dân" },
-  ];
-
-  const taskOptions: Array<{ key: TaskKey; label: string }> = [
-    { key: "hokhau_nhankhau", label: "Hộ khẩu / Nhân khẩu" },
-    { key: "tamtru_tamvang", label: "Tạm trú / Tạm vắng" },
-    { key: "thongke", label: "Thống kê" },
-    { key: "kiennghi", label: "Kiến nghị" },
-  ];
 
   return (
     <div className="relative min-h-screen overflow-hidden">
@@ -362,68 +342,6 @@ export default function Login() {
                     />
                   </span>
                 </label>
-
-                {/* Role Selection */}
-                <div>
-                  <label className="block text-sm font-medium text-slate-200 mb-2">
-                    Vai trò <span className="text-red-400">*</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    {roleOptions.map((option) => (
-                      <button
-                        key={option.key}
-                        type="button"
-                        onClick={() => {
-                          setRegisterForm({
-                            ...registerForm,
-                            role: option.key,
-                            task:
-                              option.key === "can_bo"
-                                ? registerForm.task
-                                : undefined,
-                          });
-                        }}
-                        className={`rounded-xl border-2 px-4 py-3 text-xs font-semibold uppercase tracking-[0.15em] transition-all duration-300 ${
-                          registerForm.role === option.key
-                            ? "border-cyan-400 bg-gradient-to-r from-cyan-500/30 to-blue-500/25 text-white shadow-[0_8px_24px_rgba(14,165,233,0.4)] scale-[1.02]"
-                            : "border-slate-600/50 bg-slate-800/50 text-slate-300 hover:border-slate-500 hover:bg-slate-800/70 hover:text-white"
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Task Selection - chỉ hiện khi role = can_bo */}
-                {registerForm.role === "can_bo" && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-200 mb-2">
-                      Nhiệm vụ <span className="text-red-400">*</span>
-                    </label>
-                    <div className="grid grid-cols-2 gap-3">
-                      {taskOptions.map((option) => (
-                        <button
-                          key={option.key}
-                          type="button"
-                          onClick={() => {
-                            setRegisterForm({
-                              ...registerForm,
-                              task: option.key,
-                            });
-                          }}
-                          className={`rounded-xl border-2 px-4 py-3 text-xs font-semibold uppercase tracking-[0.15em] transition-all duration-300 ${
-                            registerForm.task === option.key
-                              ? "border-cyan-400 bg-gradient-to-r from-cyan-500/30 to-blue-500/25 text-white shadow-[0_8px_24px_rgba(14,165,233,0.4)] scale-[1.02]"
-                              : "border-slate-600/50 bg-slate-800/50 text-slate-300 hover:border-slate-500 hover:bg-slate-800/70 hover:text-white"
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 <div className="flex items-start gap-2 text-xs">
                   <input

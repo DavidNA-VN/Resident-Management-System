@@ -31,7 +31,7 @@ router.get(
   requireTask("hokhau_nhankhau"),
   async (req, res, next) => {
     try {
-      const { trangThai } = req.query;
+      const { trangThai, soHoKhau } = req.query;
       let queryStr = `SELECT * FROM ho_khau WHERE 1=1`;
       const params: any[] = [];
       let paramIndex = 1;
@@ -39,6 +39,14 @@ router.get(
       if (trangThai) {
         queryStr += ` AND "trangThai" = $${paramIndex}`;
         params.push(trangThai);
+        paramIndex++;
+      }
+
+      const soHoKhauStr = String(soHoKhau || "").trim();
+      if (soHoKhauStr) {
+        // Search by household number (supports partial match)
+        queryStr += ` AND "soHoKhau" ILIKE $${paramIndex}`;
+        params.push(`%${soHoKhauStr}%`);
         paramIndex++;
       }
 

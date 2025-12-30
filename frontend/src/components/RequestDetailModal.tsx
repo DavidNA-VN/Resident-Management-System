@@ -25,12 +25,16 @@ interface RequestDetail {
     diaChi?: string;
   };
   targetHouseholdId?: number;
+  targetPersonId?: number;
   requester?: { hoTen?: string; cccd?: string; username?: string };
   requesterName?: string;
   requesterUsername?: string;
   requesterCccd?: string;
   createdAt: string;
   payload: any;
+  precheck?: {
+    warnings?: Array<{ code: string; message: string; details?: any }>;
+  };
 }
 
 const firstNonEmpty = (...candidates: any[]): string | undefined => {
@@ -68,30 +72,6 @@ const extractRequester = (raw: any) => {
   return { name, cccd };
 };
 
-const buildNhanKhauPayloadFromRequest = (person: any) => {
-  if (!person) return null;
-  return {
-    hoTen: person.hoTen,
-    hoKhauId: undefined as any, // sẽ gán sau
-    biDanh: person.biDanh || undefined,
-    cccd: person.cccd || undefined,
-    ngayCapCCCD: person.ngayCapCCCD || undefined,
-    noiCapCCCD: person.noiCapCCCD || undefined,
-    ngaySinh: person.ngaySinh || undefined,
-    gioiTinh: person.gioiTinh || undefined,
-    noiSinh: person.noiSinh || undefined,
-    nguyenQuan: person.nguyenQuan || undefined,
-    danToc: person.danToc || undefined,
-    tonGiao: person.tonGiao || undefined,
-    quocTich: person.quocTich || undefined,
-    quanHe: person.quanHe || "khac",
-    ngayDangKyThuongTru: person.ngayDangKyThuongTru || undefined,
-    diaChiThuongTruTruoc: person.diaChiThuongTruTruoc || undefined,
-    ngheNghiep: person.ngheNghiep || undefined,
-    noiLamViec: person.noiLamViec || undefined,
-    ghiChu: person.ghiChu || undefined,
-  };
-};
 
 const requestTypeLabels: Record<string, string> = {
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
@@ -102,20 +82,12 @@ const requestTypeLabels: Record<string, string> = {
   TEMPORARY_ABSENCE: "Xin tạm vắng",
   SUA_NHAN_KHAU: "Sửa thông tin nhân khẩu",
   XOA_NHAN_KHAU: "Xoá nhân khẩu",
+  UPDATE_PERSON: "Sửa thông tin nhân khẩu",
+  REMOVE_PERSON: "Xoá nhân khẩu",
   TAM_TRU: "Xin tạm trú",
   TAM_VANG: "Xin tạm vắng",
   DECEASED: "Xác nhận qua đời",
-};
-
-const quanHeLabels: Record<string, string> = {
-  chu_ho: "Chủ hộ",
-  vo_chong: "Vợ/Chồng",
-  con: "Con",
-  cha_me: "Cha/Mẹ",
-  anh_chi_em: "Anh/Chị/Em",
-  ong_ba: "Ông/Bà",
-  chau: "Cháu",
-  khac: "Khác",
+  MOVE_OUT: "Xác nhận chuyển đi",
 };
 
 export default function RequestDetailModal({
@@ -133,6 +105,23 @@ export default function RequestDetailModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+
+  const warnings = Array.isArray(requestDetail?.precheck?.warnings)
+    ? requestDetail!.precheck!.warnings!
+    : [];
+  const hasBlockingWarnings = warnings.length > 0;
+
+  const buildRejectReasonFromWarnings = (
+    ws: Array<{ code?: string; message?: string }>
+  ) => {
+    const lines = (ws || [])
+      .map((w) => String(w?.message || "").trim())
+      .filter(Boolean);
+    if (lines.length === 0) return "";
+    return `Không thể duyệt do các cảnh báo/điều kiện tiên quyết sau:\n- ${lines.join(
+      "\n- "
+    )}`;
+  };
 
   useEffect(() => {
     if (isOpen && requestId) {
@@ -182,6 +171,13 @@ export default function RequestDetailModal({
           requesterUsername: raw.requesterUsername || raw.requester?.username,
           requesterCccd: raw.requesterCccd || requesterExtract.cccd,
         });
+
+        // If backend reports precheck warnings, suggest a reject reason up-front
+        const ws = Array.isArray(raw?.precheck?.warnings) ? raw.precheck.warnings : [];
+        if (ws.length > 0) {
+          const suggested = buildRejectReasonFromWarnings(ws);
+          setRejectReason((prev) => (prev.trim() ? prev : suggested));
+        }
         // compute role/canReview debug
         const cu = getCurrentUser();
         const role = cu?.role || null;
@@ -208,6 +204,15 @@ export default function RequestDetailModal({
   };
 
   const handleApprove = async () => {
+    if (hasBlockingWarnings) {
+      const suggested = buildRejectReasonFromWarnings(warnings);
+      if (suggested) setRejectReason((prev) => (prev.trim() ? prev : suggested));
+      setError(
+        "Yêu cầu có cảnh báo/điều kiện tiên quyết nên không thể duyệt. Vui lòng từ chối và ghi rõ lý do."
+      );
+      return;
+    }
+
     if (!confirm("Bạn có chắc chắn muốn duyệt yêu cầu này?")) {
       return;
     }
@@ -458,6 +463,35 @@ export default function RequestDetailModal({
               </div>
             ) : requestDetail ? (
               <>
+                {/* Precheck warnings */}
+                {hasBlockingWarnings && (
+                  <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+                    <h3 className="text-lg font-semibold text-yellow-800 mb-2">
+                      Cảnh báo trước khi duyệt
+                    </h3>
+                    <p className="text-sm text-yellow-900 mb-3">
+                      Yêu cầu này đang có điều kiện tiên quyết chưa đạt. Để tránh duyệt xong bị lỗi, hệ thống khóa nút Duyệt và bạn cần Từ chối kèm lý do.
+                    </p>
+                    <ul className="list-disc pl-5 space-y-1 text-sm text-yellow-900">
+                      {warnings.map((w: any, idx: number) => (
+                        <li key={`WARN-${idx}`}>{String(w?.message || "-")}</li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => {
+                          const suggested = buildRejectReasonFromWarnings(warnings);
+                          if (suggested) setRejectReason(suggested);
+                          setShowRejectModal(true);
+                        }}
+                        className="rounded-md bg-red-600 text-white px-3 py-1 text-sm font-medium hover:bg-red-700"
+                      >
+                        Từ chối theo cảnh báo
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Thông tin chung */}
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">
@@ -552,7 +586,8 @@ export default function RequestDetailModal({
                 </div>
 
                 {/* Chi tiết theo loại yêu cầu */}
-                {requestDetail.type === "TACH_HO_KHAU" &&
+                {(requestDetail.type === "TACH_HO_KHAU" ||
+                  requestDetail.type === "SPLIT_HOUSEHOLD") &&
                   requestDetail.payload && (
                     <div className="rounded-lg border border-gray-200 bg-white p-4">
                       <h3 className="text-lg font-semibold text-gray-900 mb-4">
@@ -630,20 +665,106 @@ export default function RequestDetailModal({
                     </div>
                   )}
 
-                {requestDetail.type === "SUA_NHAN_KHAU" &&
+                {requestDetail.type === "ADD_PERSON" && requestDetail.payload && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Chi tiết yêu cầu thêm nhân khẩu
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm font-medium text-gray-700 mb-2">
+                          Thông tin nhân khẩu
+                        </p>
+                        <div className="bg-gray-50 rounded p-3 text-sm text-gray-700 space-y-1">
+                          <p>
+                            Họ tên: {requestDetail.payload?.person?.hoTen || "-"}
+                          </p>
+                          <p>
+                            CCCD: {requestDetail.payload?.person?.cccd || "-"}
+                          </p>
+                          <p>
+                            Ngày sinh:{" "}
+                            {requestDetail.payload?.person?.ngaySinh
+                              ? formatFromYMD(requestDetail.payload.person.ngaySinh)
+                              : "-"}
+                          </p>
+                          <p>
+                            Giới tính: {requestDetail.payload?.person?.gioiTinh || "-"}
+                          </p>
+                          <p>
+                            Nơi sinh: {requestDetail.payload?.person?.noiSinh || "-"}
+                          </p>
+                          <p>
+                            Quan hệ: {requestDetail.payload?.person?.quanHe || "-"}
+                          </p>
+                          {requestDetail.payload?.person?.ngheNghiep && (
+                            <p>Nghề nghiệp: {requestDetail.payload.person.ngheNghiep}</p>
+                          )}
+                          {requestDetail.payload?.person?.ghiChu && (
+                            <p className="whitespace-pre-wrap">
+                              Ghi chú: {requestDetail.payload.person.ghiChu}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {requestDetail.payload?.reason && (
+                        <div>
+                          <p className="text-sm font-medium text-gray-700 mb-2">Lý do</p>
+                          <p className="text-sm text-gray-600 whitespace-pre-wrap">
+                            {requestDetail.payload.reason}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {requestDetail.type === "ADD_NEWBORN" && requestDetail.payload && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Chi tiết yêu cầu thêm con sơ sinh
+                    </h3>
+                    {(() => {
+                      const newborn = requestDetail.payload?.newborn || requestDetail.payload;
+                      return (
+                        <div className="bg-gray-50 rounded p-3 text-sm text-gray-700 space-y-1">
+                          <p>Họ tên: {newborn?.hoTen || "-"}</p>
+                          <p>
+                            Ngày sinh:{" "}
+                            {newborn?.ngaySinh
+                              ? formatFromYMD(newborn.ngaySinh)
+                              : "-"}
+                          </p>
+                          <p>Giới tính: {newborn?.gioiTinh || "-"}</p>
+                          <p>Nơi sinh: {newborn?.noiSinh || "-"}</p>
+                          {newborn?.isMoiSinh !== undefined && (
+                            <p>
+                              Trẻ mới sinh: {newborn.isMoiSinh ? "Có" : "Không"}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {(requestDetail.type === "SUA_NHAN_KHAU" ||
+                  requestDetail.type === "UPDATE_PERSON") &&
                   requestDetail.payload && (
                     <div className="rounded-lg border border-gray-200 bg-white p-4">
                       <h3 className="text-lg font-semibold text-gray-900 mb-4">
                         Chi tiết yêu cầu sửa nhân khẩu
                       </h3>
                       <div className="space-y-4">
-                        {requestDetail.payload.nhanKhauId && (
+                        {(requestDetail.payload.nhanKhauId ||
+                          requestDetail.payload.personId) && (
                           <div>
                             <p className="text-sm font-medium text-gray-700 mb-2">
                               Nhân khẩu cần sửa
                             </p>
                             <p className="text-sm text-gray-600">
-                              ID: {requestDetail.payload.nhanKhauId}
+                              ID: {requestDetail.payload.nhanKhauId || requestDetail.payload.personId}
                             </p>
                           </div>
                         )}
@@ -690,20 +811,22 @@ export default function RequestDetailModal({
                     </div>
                   )}
 
-                {requestDetail.type === "XOA_NHAN_KHAU" &&
+                {(requestDetail.type === "XOA_NHAN_KHAU" ||
+                  requestDetail.type === "REMOVE_PERSON") &&
                   requestDetail.payload && (
                     <div className="rounded-lg border border-gray-200 bg-white p-4">
                       <h3 className="text-lg font-semibold text-gray-900 mb-4">
                         Chi tiết yêu cầu xoá nhân khẩu
                       </h3>
                       <div className="space-y-4">
-                        {requestDetail.payload.nhanKhauId && (
+                        {(requestDetail.payload.nhanKhauId ||
+                          requestDetail.payload.personId) && (
                           <div>
                             <p className="text-sm font-medium text-gray-700 mb-2">
                               Nhân khẩu cần xoá
                             </p>
                             <p className="text-sm text-gray-600">
-                              ID: {requestDetail.payload.nhanKhauId}
+                              ID: {requestDetail.payload.nhanKhauId || requestDetail.payload.personId}
                             </p>
                           </div>
                         )}
@@ -721,7 +844,9 @@ export default function RequestDetailModal({
                     </div>
                   )}
 
-                {requestDetail.type === "TAM_TRU" && requestDetail.payload && (
+                {(requestDetail.type === "TAM_TRU" ||
+                  requestDetail.type === "TEMPORARY_RESIDENCE") &&
+                  requestDetail.payload && (
                   <div className="rounded-lg border border-gray-200 bg-white p-4">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">
                       Chi tiết yêu cầu tạm trú
@@ -737,13 +862,13 @@ export default function RequestDetailModal({
                           </p>
                         </div>
                       )}
-                      {requestDetail.payload.diaChi && (
+                      {(requestDetail.payload.soHoKhau || requestDetail.payload.diaChi) && (
                         <div>
                           <p className="text-sm font-medium text-gray-700 mb-2">
-                            Địa chỉ tạm trú
+                            Số hộ khẩu
                           </p>
                           <p className="text-sm text-gray-600">
-                            {requestDetail.payload.diaChi}
+                            {requestDetail.payload.soHoKhau || requestDetail.payload.diaChi}
                           </p>
                         </div>
                       )}
@@ -783,7 +908,9 @@ export default function RequestDetailModal({
                   </div>
                 )}
 
-                {requestDetail.type === "TAM_VANG" && requestDetail.payload && (
+                {(requestDetail.type === "TAM_VANG" ||
+                  requestDetail.type === "TEMPORARY_ABSENCE") &&
+                  requestDetail.payload && (
                   <div className="rounded-lg border border-gray-200 bg-white p-4">
                     <h3 className="text-lg font-semibold text-gray-900 mb-4">
                       Chi tiết yêu cầu tạm vắng
@@ -835,19 +962,117 @@ export default function RequestDetailModal({
                   </div>
                 )}
 
+                {requestDetail.type === "DECEASED" && requestDetail.payload && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Chi tiết yêu cầu khai tử
+                    </h3>
+                    <div className="space-y-3 text-sm text-gray-700">
+                      <div>
+                        <span className="font-medium">Nhân khẩu:</span>{" "}
+                        {requestDetail.payload.nhanKhauId ||
+                          requestDetail.payload.personId ||
+                          requestDetail.targetPersonId ||
+                          "-"}
+                      </div>
+                      {requestDetail.payload.ngayMat && (
+                        <div>
+                          <span className="font-medium">Ngày mất:</span>{" "}
+                          {formatFromYMD(requestDetail.payload.ngayMat)}
+                        </div>
+                      )}
+                      {requestDetail.payload.noiMat && (
+                        <div>
+                          <span className="font-medium">Nơi mất:</span>{" "}
+                          {requestDetail.payload.noiMat}
+                        </div>
+                      )}
+                      {requestDetail.payload.lyDo && (
+                        <div>
+                          <span className="font-medium">Lý do/Ghi chú:</span>
+                          <div className="whitespace-pre-wrap">
+                            {requestDetail.payload.lyDo}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {requestDetail.type === "MOVE_OUT" && requestDetail.payload && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Chi tiết yêu cầu chuyển đi
+                    </h3>
+                    <div className="space-y-3 text-sm text-gray-700">
+                      <div>
+                        <span className="font-medium">Nhân khẩu:</span>{" "}
+                        {requestDetail.payload.nhanKhauId ||
+                          requestDetail.payload.personId ||
+                          requestDetail.targetPersonId ||
+                          "-"}
+                      </div>
+                      {(requestDetail.payload.ngayChuyen ||
+                        requestDetail.payload.ngayDi ||
+                        requestDetail.payload.ngayThucHien) && (
+                        <div>
+                          <span className="font-medium">Ngày chuyển đi:</span>{" "}
+                          {formatFromYMD(
+                            requestDetail.payload.ngayChuyen ||
+                              requestDetail.payload.ngayDi ||
+                              requestDetail.payload.ngayThucHien
+                          )}
+                        </div>
+                      )}
+                      {(requestDetail.payload.noiDen ||
+                        requestDetail.payload.diaChiMoi ||
+                        requestDetail.payload.diaChiDen) && (
+                        <div>
+                          <span className="font-medium">Nơi đến:</span>{" "}
+                          {requestDetail.payload.noiDen ||
+                            requestDetail.payload.diaChiMoi ||
+                            requestDetail.payload.diaChiDen}
+                        </div>
+                      )}
+                      {(requestDetail.payload.lyDo ||
+                        requestDetail.payload.reason ||
+                        requestDetail.payload.noiDung) && (
+                        <div>
+                          <span className="font-medium">Lý do/Ghi chú:</span>
+                          <div className="whitespace-pre-wrap">
+                            {requestDetail.payload.lyDo ||
+                              requestDetail.payload.reason ||
+                              requestDetail.payload.noiDung}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Actions */}
                 {String(requestDetail.status || "").toUpperCase() ===
                   "PENDING" && (
                   <div className="flex gap-3 pt-4 border-t border-gray-200">
                     <button
                       onClick={handleApprove}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || hasBlockingWarnings}
                       className="flex-1 rounded-lg bg-gradient-to-r from-green-500 to-emerald-500 px-4 py-2.5 text-sm font-medium text-white shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isSubmitting ? "Đang xử lý..." : "Duyệt"}
+                      {isSubmitting
+                        ? "Đang xử lý..."
+                        : hasBlockingWarnings
+                        ? "Duyệt (bị khóa do cảnh báo)"
+                        : "Duyệt"}
                     </button>
                     <button
-                      onClick={() => setShowRejectModal(true)}
+                      onClick={() => {
+                        if (hasBlockingWarnings) {
+                          const suggested = buildRejectReasonFromWarnings(warnings);
+                          if (suggested) setRejectReason((prev) => (prev.trim() ? prev : suggested));
+                        }
+                        setShowRejectModal(true);
+                      }}
                       disabled={isSubmitting}
                       className="flex-1 rounded-lg border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >

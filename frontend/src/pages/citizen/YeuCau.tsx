@@ -1,14 +1,16 @@
 import { useState, useEffect, FormEvent } from "react";
-import RequestModal, { RequestType } from "../../components/RequestModal";
+import RequestModal, { RequestType } from "../../components/RequestModal.tsx";
 import SplitHouseholdRequestModal, {
   SplitHouseholdRequestData,
-} from "../../components/SplitHouseholdRequestModal";
+} from "../../components/SplitHouseholdRequestModal.tsx";
 import { apiService } from "../../services/api";
 
 interface NhanKhau {
   id: number;
   hoTen: string;
   cccd?: string;
+  ngayCapCCCD?: string;
+  noiCapCCCD?: string;
   quanHe: string;
 }
 
@@ -42,8 +44,11 @@ const requestTypeLabels: Record<string, string> = {
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
   SUA_NHAN_KHAU: "Sửa thông tin nhân khẩu",
   XOA_NHAN_KHAU: "Xoá nhân khẩu",
+  UPDATE_PERSON: "Sửa thông tin nhân khẩu",
+  REMOVE_PERSON: "Xoá nhân khẩu",
   SPLIT_HOUSEHOLD: "Yêu cầu tách hộ khẩu",
   DECEASED: "Xác nhận qua đời",
+  MOVE_OUT: "Xác nhận chuyển đi",
   TEMPORARY_RESIDENCE: "Xin tạm trú",
   TEMPORARY_ABSENCE: "Xin tạm vắng",
 };
@@ -75,6 +80,7 @@ export default function YeuCau() {
     | "ADD_NEWBORN"
     | "ADD_PERSON"
     | "DECEASED"
+    | "MOVE_OUT"
     | null
   >(null);
   const [showAddNewbornModal, setShowAddNewbornModal] = useState(false);
@@ -88,7 +94,48 @@ export default function YeuCau() {
   const [isLoadingHousehold, setIsLoadingHousehold] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const isHeadOfHousehold = userInfo?.personInfo?.isHeadOfHousehold === true;
+  const currentPersonId = userInfo?.personInfo?.personId;
+
+  const formatDateTimeVi = (value: any) => {
+    if (!value) return "-";
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return "-";
+    return d.toLocaleDateString("vi-VN", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const formatDateVi = (value: any) => {
+    if (!value) return "-";
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return "-";
+    return d.toLocaleDateString("vi-VN");
+  };
+
+  const inferredIsHeadFromMembers =
+    currentPersonId !== undefined &&
+    currentPersonId !== null &&
+    nhanKhauList.some(
+      (nk) =>
+        Number(nk.id) === Number(currentPersonId) &&
+        String(nk.quanHe).toLowerCase() === "chu_ho"
+    );
+
+  const inferredIsHeadFromHousehold =
+    householdInfo?.chuHo?.id !== undefined &&
+    householdInfo?.chuHo?.id !== null &&
+    currentPersonId !== undefined &&
+    currentPersonId !== null &&
+    Number(householdInfo.chuHo.id) === Number(currentPersonId);
+
+  const isHeadOfHousehold =
+    userInfo?.personInfo?.isHeadOfHousehold === true ||
+    inferredIsHeadFromHousehold ||
+    inferredIsHeadFromMembers;
 
   useEffect(() => {
     loadUserInfo();
@@ -132,6 +179,8 @@ export default function YeuCau() {
       "ADD_PERSON",
       "TAM_TRU",
       "TAM_VANG",
+      "DECEASED",
+      "MOVE_OUT",
     ];
 
     if (selectedType && needsHousehold.includes(selectedType) && !householdInfo) {
@@ -145,16 +194,25 @@ export default function YeuCau() {
       // TODO: Thay bằng getMyHousehold() khi backend có endpoint /citizen/my-household
       const response = await apiService.getMyHousehold();
       if (response.success && response.data) {
-        // Adapt data structure
-        const householdData = response.data.hoKhau || response.data.household;
-        const members =
-          response.data.nhanKhauList || response.data.members || [];
+        // Adapt data structure (backend may return different shapes)
+        const data: any = response.data;
+        const householdData = data?.hoKhau || data?.household || null;
+        const members = (data?.nhanKhauList || data?.members || []) as any[];
+
+        if (!householdData || !householdData.id) {
+          console.warn("getMyHousehold: missing household payload", data);
+          setHouseholdInfo(null);
+          setNhanKhauList([]);
+          return;
+        }
 
         setNhanKhauList(
           members.map((nk: any) => ({
             id: nk.id,
             hoTen: nk.hoTen,
             cccd: nk.cccd,
+            ngayCapCCCD: nk.ngayCapCCCD,
+            noiCapCCCD: nk.noiCapCCCD,
             quanHe: nk.quanHe,
           }))
         );
@@ -163,7 +221,7 @@ export default function YeuCau() {
           soHoKhau: householdData.soHoKhau,
           diaChi: householdData.diaChi,
           diaChiDayDu: householdData.diaChiDayDu,
-          chuHo: householdData.chuHo || response.data.chuHo,
+          chuHo: householdData.chuHo || data?.chuHo,
         });
       }
     } catch (err) {
@@ -196,9 +254,9 @@ export default function YeuCau() {
       TAM_TRU: "TEMPORARY_RESIDENCE",
       TAM_VANG: "TEMPORARY_ABSENCE",
       TACH_HO_KHAU: "SPLIT_HOUSEHOLD",
-      SUA_NHAN_KHAU: "SUA_NHAN_KHAU",
-      XOA_NHAN_KHAU: "XOA_NHAN_KHAU",
+      SUA_NHAN_KHAU: "UPDATE_PERSON",
       DECEASED: "DECEASED",
+      MOVE_OUT: "MOVE_OUT",
     };
 
     const backendType = typeMapping[data.type] || data.type;
@@ -209,10 +267,17 @@ export default function YeuCau() {
     const response = await apiService.createRequest({
       type: backendType,
       payload: data.payload,
+      targetHouseholdId:
+        backendType === "TEMPORARY_RESIDENCE" ||
+        backendType === "TEMPORARY_ABSENCE"
+          ? householdInfo?.id
+          : undefined,
       targetPersonId:
         backendType === "TEMPORARY_RESIDENCE" ||
         backendType === "TEMPORARY_ABSENCE" ||
-        backendType === "DECEASED"
+        backendType === "DECEASED" ||
+        backendType === "MOVE_OUT" ||
+        backendType === "UPDATE_PERSON"
           ? targetPersonId || undefined
           : undefined,
     });
@@ -221,7 +286,9 @@ export default function YeuCau() {
       setTimeout(() => setSuccess(null), 3000);
       loadRequests();
     } else {
-      throw new Error(response.error?.message || "Gửi yêu cầu thất bại");
+      throw new Error(
+        (response as any)?.error?.message || "Gửi yêu cầu thất bại"
+      );
     }
   };
 
@@ -239,7 +306,9 @@ export default function YeuCau() {
         setTimeout(() => setSuccess(null), 3000);
         loadRequests();
       } else {
-        throw new Error(response.error?.message || "Gửi yêu cầu thất bại");
+        throw new Error(
+          (response as any)?.error?.message || "Gửi yêu cầu thất bại"
+        );
       }
     } catch (err: any) {
       throw err;
@@ -280,7 +349,9 @@ export default function YeuCau() {
         loadRequests();
         setShowAddNewbornModal(false);
       } else {
-        throw new Error(response.error?.message || "Gửi yêu cầu thất bại");
+        throw new Error(
+          (response as any)?.error?.message || "Gửi yêu cầu thất bại"
+        );
       }
     } catch (err: any) {
       throw err;
@@ -292,23 +363,49 @@ export default function YeuCau() {
       throw new Error("Chỉ chủ hộ mới được phép tạo yêu cầu.");
     }
     try {
+      const requiredFields = [
+        "hoTen",
+        "cccd",
+        "ngaySinh",
+        "gioiTinh",
+        "quanHe",
+        "noiSinh",
+        "nguyenQuan",
+        "danToc",
+        "tonGiao",
+        "quocTich",
+        "ngheNghiep",
+        "noiLamViec",
+        "ngayDangKyThuongTru",
+        "diaChiThuongTruTruoc",
+      ];
+      const missing = requiredFields.filter(
+        (k) => !String(data?.[k] ?? "").trim()
+      );
+      if (missing.length > 0) {
+        throw new Error(
+          "Vui lòng nhập đầy đủ các trường bắt buộc (trừ Ghi chú) trước khi gửi yêu cầu."
+        );
+      }
+
       const payload: any = {
         type: "ADD_PERSON",
         payload: {
           person: {
-            hoTen: data.hoTen,
-            cccd: data.cccd || undefined,
+            hoTen: String(data.hoTen).trim(),
+            cccd: String(data.cccd).trim(),
             ngaySinh: data.ngaySinh,
             gioiTinh: data.gioiTinh,
-            noiSinh: data.noiSinh,
-            nguyenQuan: data.nguyenQuan || undefined,
-            danToc: data.danToc || undefined,
-            tonGiao: data.tonGiao || undefined,
-            quocTich: data.quocTich || "Việt Nam",
-            ngayDangKyThuongTru: data.ngayDangKyThuongTru || undefined,
-            diaChiThuongTruTruoc: data.diaChiThuongTruTruoc || undefined,
-            ngheNghiep: data.ngheNghiep || undefined,
-            noiLamViec: data.noiLamViec || undefined,
+            noiSinh: String(data.noiSinh).trim(),
+            nguyenQuan: String(data.nguyenQuan).trim(),
+            danToc: String(data.danToc).trim(),
+            tonGiao: String(data.tonGiao).trim(),
+            quocTich: String(data.quocTich).trim() || "Việt Nam",
+            quanHe: data.quanHe,
+            ngayDangKyThuongTru: data.ngayDangKyThuongTru,
+            diaChiThuongTruTruoc: String(data.diaChiThuongTruTruoc).trim(),
+            ngheNghiep: String(data.ngheNghiep).trim(),
+            noiLamViec: String(data.noiLamViec).trim(),
             ghiChu: data.ghiChu || undefined,
           },
         },
@@ -323,10 +420,7 @@ export default function YeuCau() {
         payload.targetHouseholdId = resolvedHouseholdId;
       }
 
-      // Thêm quanHe nếu user chưa linked
-      if (!userInfo?.linked && data.quanHe) {
-        payload.payload.person.quanHe = data.quanHe;
-      }
+      // Always include quanHe for add-person request
 
       const response = await apiService.createRequest(payload);
       if (response.success) {
@@ -335,7 +429,9 @@ export default function YeuCau() {
         loadRequests();
         setShowAddPersonModal(false);
       } else {
-        throw new Error(response.error?.message || "Gửi yêu cầu thất bại");
+        throw new Error(
+          (response as any)?.error?.message || "Gửi yêu cầu thất bại"
+        );
       }
     } catch (err: any) {
       throw err;
@@ -347,19 +443,18 @@ export default function YeuCau() {
       | RequestType
       | "TACH_HO_KHAU"
       | "ADD_NEWBORN"
-      | "ADD_PERSON"
-      | "DECEASED";
+      | "ADD_PERSON";
     label: string;
     icon: string;
   }> = [
     { type: "ADD_PERSON", label: "Thêm nhân khẩu", icon: "👤" },
     { type: "ADD_NEWBORN", label: "Thêm con sơ sinh", icon: "👶" },
-    { type: "DECEASED" as RequestType, label: "Xác nhận qua đời", icon: "⚰️" },
     { type: "TAM_VANG", label: "Xin tạm vắng", icon: "📍" },
     { type: "TAM_TRU", label: "Xin tạm trú", icon: "🏠" },
+    { type: "MOVE_OUT", label: "Xác nhận chuyển đi", icon: "🚚" },
+    { type: "DECEASED", label: "Xác nhận qua đời", icon: "🕯️" },
     { type: "TACH_HO_KHAU", label: "Yêu cầu tách hộ khẩu", icon: "🔄" },
     { type: "SUA_NHAN_KHAU", label: "Sửa thông tin nhân khẩu", icon: "✏️" },
-    { type: "XOA_NHAN_KHAU", label: "Xoá nhân khẩu", icon: "🗑️" },
   ];
 
   return (
@@ -449,13 +544,7 @@ export default function YeuCau() {
                     </h4>
                     <p className="text-sm text-gray-600 mb-2">
                       Ngày gửi:{" "}
-                      {new Date(request.createdAt).toLocaleDateString("vi-VN", {
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {formatDateTimeVi(request.createdAt)}
                     </p>
                     {request.payload?.lyDo && (
                       <p className="text-sm text-gray-700">
@@ -473,9 +562,7 @@ export default function YeuCau() {
                     {request.status === "APPROVED" && request.reviewedAt && (
                       <p className="text-sm text-green-700">
                         <span className="font-medium">Đã duyệt:</span>{" "}
-                        {new Date(request.reviewedAt).toLocaleDateString(
-                          "vi-VN"
-                        )}
+                        {formatDateVi(request.reviewedAt)}
                       </p>
                     )}
                   </div>
@@ -505,6 +592,9 @@ export default function YeuCau() {
         nhanKhauList={nhanKhauList.map((nk) => ({
           id: nk.id,
           hoTen: nk.hoTen,
+          cccd: nk.cccd,
+          ngayCapCCCD: nk.ngayCapCCCD,
+          noiCapCCCD: nk.noiCapCCCD,
         }))}
         householdInfo={
           householdInfo
@@ -615,22 +705,28 @@ function AddPersonModal({
     setError(null);
 
     // Validation
-    const requiredFields = ["hoTen", "ngaySinh", "gioiTinh", "noiSinh"];
-    if (isUserLinked) {
-      requiredFields.push("quanHe");
-    }
+    const requiredFields = [
+      "hoTen",
+      "cccd",
+      "ngaySinh",
+      "gioiTinh",
+      "quanHe",
+      "noiSinh",
+      "nguyenQuan",
+      "danToc",
+      "tonGiao",
+      "quocTich",
+      "ngheNghiep",
+      "noiLamViec",
+      "ngayDangKyThuongTru",
+      "diaChiThuongTruTruoc",
+    ];
 
-    const missingFields = requiredFields.filter((field) => !formData[field]);
+    const missingFields = requiredFields.filter(
+      (field) => !String((formData as any)[field] ?? "").trim()
+    );
     if (missingFields.length > 0) {
-      setError(
-        `Vui lòng điền đầy đủ các trường bắt buộc: ${missingFields.join(", ")}`
-      );
-      return;
-    }
-
-    // Nếu user chưa linked, quanHe là bắt buộc
-    if (!isUserLinked && !formData.quanHe) {
-      setError("Vui lòng chọn quan hệ với chủ hộ");
+      setError("Vui lòng điền đầy đủ tất cả các trường (trừ Ghi chú).");
       return;
     }
 
@@ -726,16 +822,17 @@ function AddPersonModal({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                CCCD/CMND
+                CCCD/CMND <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={formData.cccd}
                 onChange={(e) =>
                   setFormData({ ...formData, cccd: e.target.value })
                 }
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                placeholder="Nhập số CCCD nếu có"
+                placeholder="Nhập số CCCD/CMND"
               />
             </div>
           </div>
@@ -819,10 +916,11 @@ function AddPersonModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Nguyên quán
+                Nguyên quán <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={formData.nguyenQuan}
                 onChange={(e) =>
                   setFormData({ ...formData, nguyenQuan: e.target.value })
@@ -834,10 +932,11 @@ function AddPersonModal({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Dân tộc
+                Dân tộc <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={formData.danToc}
                 onChange={(e) =>
                   setFormData({ ...formData, danToc: e.target.value })
@@ -851,10 +950,11 @@ function AddPersonModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Tôn giáo
+                Tôn giáo <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={formData.tonGiao}
                 onChange={(e) =>
                   setFormData({ ...formData, tonGiao: e.target.value })
@@ -866,10 +966,11 @@ function AddPersonModal({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Quốc tịch
+                Quốc tịch <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={formData.quocTich}
                 onChange={(e) =>
                   setFormData({ ...formData, quocTich: e.target.value })
@@ -883,10 +984,11 @@ function AddPersonModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Nghề nghiệp
+                Nghề nghiệp <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={formData.ngheNghiep}
                 onChange={(e) =>
                   setFormData({ ...formData, ngheNghiep: e.target.value })
@@ -898,10 +1000,11 @@ function AddPersonModal({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Nơi làm việc
+                Nơi làm việc <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={formData.noiLamViec}
                 onChange={(e) =>
                   setFormData({ ...formData, noiLamViec: e.target.value })
@@ -915,10 +1018,11 @@ function AddPersonModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Ngày đăng ký thường trú
+                Ngày đăng ký thường trú <span className="text-red-500">*</span>
               </label>
               <input
                 type="date"
+                required
                 value={formData.ngayDangKyThuongTru}
                 onChange={(e) =>
                   setFormData({
@@ -932,10 +1036,11 @@ function AddPersonModal({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Địa chỉ thường trú trước đây
+                Địa chỉ thường trú trước đây <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 value={formData.diaChiThuongTruTruoc}
                 onChange={(e) =>
                   setFormData({

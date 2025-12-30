@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { apiService } from "../../services/api";
 import { formatFromYMD } from "../../utils/date";
 
@@ -153,13 +154,13 @@ export default function CitizenHome() {
           </div>
 
           <div className="text-center">
-            <a
-              href="/citizen/yeu-cau"
+            <Link
+              to="/citizen/yeu-cau"
               className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 font-semibold"
             >
               <span className="mr-2">📝</span>
               Tạo yêu cầu ngay
-            </a>
+            </Link>
           </div>
         </div>
       </div>

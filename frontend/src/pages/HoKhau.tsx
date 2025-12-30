@@ -133,6 +133,9 @@ export default function HoKhau() {
     ? (JSON.parse(localStorage.getItem("userInfo") || "null") as any)
     : null;
   const canEditMember = currentUser?.role !== "nguoi_dan";
+  const canSearchHoKhauBySo = currentUser?.role === "to_truong";
+
+  const [searchSoHoKhau, setSearchSoHoKhau] = useState("");
 
   const [formData, setFormData] = useState({
     diaChi: "",
@@ -163,10 +166,11 @@ export default function HoKhau() {
     loadHoKhauList();
   }, []);
 
-  const loadHoKhauList = async () => {
+  const loadHoKhauList = async (opts?: { soHoKhau?: string }) => {
     setIsLoading(true);
     try {
-      const response = await apiService.getHoKhauList();
+      const soHoKhau = String(opts?.soHoKhau || "").trim();
+      const response = await apiService.getHoKhauList(undefined, soHoKhau || undefined);
       if (response.success) {
         setHoKhauList(response.data);
       }
@@ -227,6 +231,40 @@ export default function HoKhau() {
     }
   };
 
+  const formatHistoryValue = (field: string, raw: any) => {
+    const value = raw === null || raw === undefined ? "" : String(raw).trim();
+    if (value === "") return "(trống)";
+
+    const f = String(field || "");
+    if (f === "ngayCap") {
+      // Expect YYYY-MM-DD; keep safe fallback
+      const parts = value.split("-");
+      if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      const d = new Date(value);
+      if (!Number.isNaN(d.getTime())) return d.toLocaleDateString("vi-VN");
+      return value;
+    }
+
+    if (f === "trangThai") {
+      const normalized = value.toLowerCase();
+      if (normalized === "active" || normalized === "da_kich_hoat") return "Đã kích hoạt";
+      if (normalized === "inactive" || normalized === "chua_kich_hoat") return "Chưa kích hoạt";
+      return value;
+    }
+
+    if (f === "chuHoId") {
+      const id = Number(value);
+      if (!Number.isNaN(id)) {
+        const member = viewNhanKhau.find((m) => Number(m.id) === id);
+        if (member) return `${member.hoTen} (ID: ${id})`;
+        return `ID: ${id}`;
+      }
+      return value;
+    }
+
+    return value;
+  };
+
   const closeViewHousehold = () => {
     setShowViewModal(false);
     setViewingHoKhau(null);
@@ -280,11 +318,19 @@ export default function HoKhau() {
                       </td>
                       <td className="px-3 py-2">{h.hanhDong}</td>
                       <td className="px-3 py-2">
-                        {historyFieldLabels[h.truong] || h.truong}
+                        {(historyFieldLabels as Record<string, string>)[
+                          String(h.truong)
+                        ] || h.truong}
                       </td>
                       <td className="px-3 py-2">
                         <div className="text-xs text-gray-600">
-                          {h.noiDungCu || "-"} → {h.noiDungMoi || "-"}
+                          <span className="text-gray-500">
+                            {formatHistoryValue(h.truong, h.noiDungCu)}
+                          </span>
+                          <span className="mx-2 text-gray-400">→</span>
+                          <span className="text-gray-900">
+                            {formatHistoryValue(h.truong, h.noiDungMoi)}
+                          </span>
                         </div>
                       </td>
                       <td className="px-3 py-2">
@@ -368,8 +414,8 @@ export default function HoKhau() {
     e.preventDefault();
     if (!editingHoKhau) return;
 
-    if (!editFormData.soHoKhau || !editFormData.diaChi) {
-      setError("Vui lòng điền số hộ khẩu và địa chỉ");
+    if (!editFormData.diaChi) {
+      setError("Vui lòng điền địa chỉ");
       return;
     }
 
@@ -379,7 +425,6 @@ export default function HoKhau() {
 
     try {
       const payload = {
-        soHoKhau: editFormData.soHoKhau,
         diaChi: editFormData.diaChi,
         diaChiDayDu: editFormData.diaChiDayDu || undefined,
         tinhThanh: editFormData.tinhThanh || undefined,
@@ -1206,7 +1251,9 @@ export default function HoKhau() {
                           {nk.ngaySinh ? formatFromYMD(nk.ngaySinh) : "-"}
                         </td>
                         <td className="px-4 py-2 text-gray-700">
-                          {(nk.ghiChu ?? "").trim() || "Còn sống"}
+                          {((nk as any).ghiChuHoKhau ?? "").trim() ||
+                            (nk.ghiChu ?? "").trim() ||
+                            "-"}
                         </td>
                         <td className="px-4 py-2 text-right text-gray-700">
                           <div className="flex justify-end gap-2">
@@ -1265,15 +1312,9 @@ export default function HoKhau() {
                   Số hộ khẩu <span className="text-red-500">*</span>
                   <input
                     type="text"
-                    required
                     value={editFormData.soHoKhau}
-                    onChange={(e) =>
-                      setEditFormData({
-                        ...editFormData,
-                        soHoKhau: e.target.value,
-                      })
-                    }
-                    className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    readOnly
+                    className="mt-1 w-full cursor-not-allowed rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-sm text-gray-600"
                   />
                 </label>
 
@@ -1440,9 +1481,36 @@ export default function HoKhau() {
       {/* List */}
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 p-4">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Danh sách hộ khẩu ({hoKhauList.length})
-          </h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Danh sách hộ khẩu ({hoKhauList.length})
+            </h2>
+
+            {canSearchHoKhauBySo && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setError(null);
+                  loadHoKhauList({ soHoKhau: searchSoHoKhau });
+                }}
+                className="flex w-full items-center gap-2 sm:w-auto"
+              >
+                <input
+                  type="text"
+                  value={searchSoHoKhau}
+                  onChange={(e) => setSearchSoHoKhau(e.target.value)}
+                  placeholder="Tìm theo số hộ khẩu..."
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 sm:w-72"
+                />
+                <button
+                  type="submit"
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:border-blue-300 hover:text-blue-600"
+                >
+                  Tìm
+                </button>
+              </form>
+            )}
+          </div>
         </div>
 
         {isLoading && hoKhauList.length === 0 ? (

@@ -110,11 +110,44 @@ export default function RequestModal({
         return;
       }
     }
+
+    if (type === "SUA_NHAN_KHAU") {
+      const changedKeys = ["hoTen", "ngaySinh", "gioiTinh"];
+      const hasChange = changedKeys.some((k) => {
+        const v = formData?.[k];
+        if (v === null || v === undefined) return false;
+        return String(v).trim() !== "";
+      });
+      if (!hasChange) {
+        setError("Vui lòng nhập ít nhất một thông tin cần sửa (trừ CCCD)");
+        return;
+      }
+      if (formData?.gioiTinh) {
+        const gt = String(formData.gioiTinh).toLowerCase();
+        if (!["nam", "nu", "khac"].includes(gt)) {
+          setError("Giới tính không hợp lệ");
+          return;
+        }
+      }
+      if (formData?.ngaySinh) {
+        const d = new Date(formData.ngaySinh);
+        if (Number.isNaN(d.getTime())) {
+          setError("Ngày sinh không hợp lệ");
+          return;
+        }
+      }
+    }
+
     setIsSubmitting(true);
     try {
+      const submitPayload = { ...formData };
+      // Không cho phép sửa CCCD/Thông tin cấp CCCD
+      delete submitPayload.cccd;
+      delete submitPayload.ngayCapCCCD;
+      delete submitPayload.noiCapCCCD;
       await onSubmit({
         type,
-        payload: formData,
+        payload: submitPayload,
       });
       // Reset form sau khi submit thành công
       setFormData({});
@@ -954,27 +987,6 @@ export default function RequestModal({
                               "w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20",
                             placeholder:
                               "Nh\u1EADp h\u1ECD t\u00EAn m\u1EDBi...",
-                          }),
-                        ],
-                      }),
-                      _jsxs("div", {
-                        children: [
-                          _jsx("label", {
-                            className:
-                              "block text-sm font-medium text-gray-700 mb-2",
-                            children: "CCCD/CMND m\u1EDBi",
-                          }),
-                          _jsx("input", {
-                            type: "text",
-                            value: formData.cccd || "",
-                            onChange: (e) =>
-                              setFormData({
-                                ...formData,
-                                cccd: e.target.value,
-                              }),
-                            className:
-                              "w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20",
-                            placeholder: "Nh\u1EADp CCCD/CMND m\u1EDBi...",
                           }),
                         ],
                       }),

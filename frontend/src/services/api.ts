@@ -12,7 +12,8 @@ export interface RegisterRequest {
   username: string;
   password: string;
   fullName: string;
-  role: "to_truong" | "to_pho" | "can_bo" | "nguoi_dan";
+  // Registration UI defaults to citizen; backend enforces role = 'nguoi_dan'
+  role?: "to_truong" | "to_pho" | "can_bo" | "nguoi_dan";
   task?: "hokhau_nhankhau" | "tamtru_tamvang" | "thongke" | "kiennghi";
 }
 
@@ -59,7 +60,7 @@ export interface RegisterResponse {
 export interface UserInfo {
   id: number;
   username: string;
-  role: "to_truong" | "to_pho" | "can_bo" | "nguoi_dan";
+  role: "admin" | "to_truong" | "to_pho" | "can_bo" | "nguoi_dan";
   task: "hokhau_nhankhau" | "tamtru_tamvang" | "thongke" | "kiennghi" | null;
   linked?: boolean; // Chỉ cho role="nguoi_dan"
   personInfo?: {
@@ -189,6 +190,30 @@ class ApiService {
     });
   }
 
+  async getThongKe(params: {
+    genders?: string[];
+    ageGroups?: string[];
+    residenceTypes?: string[];
+    startDate?: string;
+    endDate?: string;
+  }): Promise<{
+    success: boolean;
+    demographics: any[];
+    residence: any[];
+    details: any[];
+    error?: any;
+  }> {
+    const qs = new URLSearchParams();
+    (params.genders || []).forEach((g) => qs.append("genders", g));
+    (params.ageGroups || []).forEach((a) => qs.append("ageGroups", a));
+    (params.residenceTypes || []).forEach((r) => qs.append("residenceTypes", r));
+    if (params.startDate) qs.set("startDate", params.startDate);
+    if (params.endDate) qs.set("endDate", params.endDate);
+
+    const query = qs.toString();
+    return this.request(`/thongke${query ? `?${query}` : ""}`, { method: "GET" });
+  }
+
   async getCitizenHouseholds() {
     return this.request<{ success: boolean; data: any[] }>(
       "/citizen/households",
@@ -217,10 +242,11 @@ class ApiService {
   }
 
   // Hộ khẩu APIs
-  async getHoKhauList(trangThai?: string) {
+  async getHoKhauList(trangThai?: string, soHoKhau?: string) {
     const cacheBust = `_=${Date.now()}`;
     const params = new URLSearchParams();
     if (trangThai) params.append("trangThai", trangThai);
+    if (soHoKhau) params.append("soHoKhau", soHoKhau);
     params.append("_", cacheBust);
     const query = params.toString();
     return this.request<{ success: boolean; data: any[] }>(
@@ -366,6 +392,9 @@ class ApiService {
       diaChiThuongTruTruoc?: string;
       ngheNghiep?: string;
       noiLamViec?: string;
+      ghiChu?: string;
+      ghiChuHoKhau?: string;
+      lyDoKhongCoCCCD?: string;
     }
   ) {
     return this.request<{ success: boolean; data: any }>(`/nhan-khau/${id}`, {
@@ -517,13 +546,27 @@ class ApiService {
   }
 
   // Lấy tất cả phản ánh (cho admin/tổ trưởng)
-  async getAllFeedbacks(params: { page?: number; limit?: number; status?: string; category?: string; userId?: number } = {}) {
+  async getAllFeedbacks(
+    params: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      category?: string;
+      userId?: number;
+      keyword?: string;
+      reporterKeyword?: string;
+      includeMerged?: boolean;
+    } = {}
+  ) {
     const query = new URLSearchParams();
     if (params.page) query.append("page", String(params.page));
     if (params.limit) query.append("limit", String(params.limit));
     if (params.status) query.append("status", params.status);
     if (params.category) query.append("category", params.category);
     if (params.userId) query.append("userId", String(params.userId));
+    if (params.keyword) query.append("keyword", params.keyword);
+    if (params.reporterKeyword) query.append("reporterKeyword", params.reporterKeyword);
+    if (params.includeMerged) query.append("includeMerged", "1");
 
     return this.request<{
       success: boolean;
@@ -639,6 +682,7 @@ class ApiService {
     hoKhauId: number;
     selectedNhanKhauIds: number[];
     newChuHoId: number;
+    oldHouseholdNewChuHoId?: number;
     newAddress: string;
     expectedDate: string;
     reason: string;
@@ -835,7 +879,7 @@ class ApiService {
     formData.append("lyDo", data.lyDo);
 
     if (data.attachments) {
-      data.attachments.forEach((file, index) => {
+      data.attachments.forEach((file) => {
         formData.append(`attachments`, file);
       });
     }

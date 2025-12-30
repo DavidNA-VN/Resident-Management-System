@@ -71,50 +71,23 @@ async function resolvePersonLink(username: string, personId?: number | null) {
 // POST /auth/register
 router.post("/auth/register", async (req, res, next) => {
   try {
-    const { username, password, fullName, role, task } = req.body as {
+    const { username, password, fullName } = req.body as {
       username?: string;
       password?: string;
       fullName?: string;
-      role?: string;
-      task?: string;
     };
 
+    // Registration is for citizens only. Staff accounts are provisioned directly in DB.
+    const role: RoleCode = "nguoi_dan";
+    const task: string | undefined = undefined;
+
     // Validation: thiếu field required
-    if (!username || !password || !fullName || !role) {
+    if (!username || !password || !fullName) {
       return res.status(400).json({
         success: false,
         error: {
           code: "VALIDATION_ERROR",
-          message:
-            "Missing required fields: username, password, fullName, role",
-        },
-      });
-    }
-
-    // Validation: role không hợp lệ
-    const validRoles: RoleCode[] = [
-      "to_truong",
-      "to_pho",
-      "can_bo",
-      "nguoi_dan",
-    ];
-    if (!validRoles.includes(role as RoleCode)) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: `Invalid role. Must be one of: ${validRoles.join(", ")}`,
-        },
-      });
-    }
-
-    // Validation: role="can_bo" mà thiếu task
-    if (role === "can_bo" && !task) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Missing task for can_bo",
+          message: "Missing required fields: username, password, fullName",
         },
       });
     }
@@ -138,48 +111,46 @@ router.post("/auth/register", async (req, res, next) => {
       }
     }
 
-    // Force task = NULL nếu role != "can_bo"
-    const finalTask = role === "can_bo" ? task : null;
+    // Citizens never have a task
+    const finalTask = null;
 
     let finalUsername: string = username;
 
-    // Đối với role="nguoi_dan": username chính là CCCD (normalize)
-    if (role === "nguoi_dan") {
-      if (!username || username.trim() === "") {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "CCCD là bắt buộc cho người dân",
-          },
-        });
-      }
+    // Citizens: username is CCCD (normalize)
+    if (!username || username.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "CCCD là bắt buộc cho người dân",
+        },
+      });
+    }
 
-      // Chuẩn hoá và validate CCCD
-      const normalizedCCCD = normalizeCCCD(username);
+    // Chuẩn hoá và validate CCCD
+    const normalizedCCCD = normalizeCCCD(username);
 
-      if (!normalizedCCCD) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "CCCD không hợp lệ (chỉ chứa số)",
-          },
-        });
-      }
+    if (!normalizedCCCD) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "CCCD không hợp lệ (chỉ chứa số)",
+        },
+      });
+    }
 
-      finalUsername = normalizedCCCD;
+    finalUsername = normalizedCCCD;
 
-      // Validate độ dài CCCD (thường 9-12 ký tự)
-      if (finalUsername.length < 9 || finalUsername.length > 12) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: "VALIDATION_ERROR",
-            message: "CCCD phải có 9-12 chữ số",
-          },
-        });
-      }
+    // Validate độ dài CCCD (thường 9-12 ký tự)
+    if (finalUsername.length < 9 || finalUsername.length > 12) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "CCCD phải có 9-12 chữ số",
+        },
+      });
     }
 
     // Check uniqueness: username đã tồn tại

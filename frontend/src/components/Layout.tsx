@@ -20,6 +20,36 @@ const taskLabels: Record<string, string> = {
   kiennghi: "Kiến nghị",
 };
 
+function canAccessPath(user: UserInfo | null, path: string): boolean {
+  if (!user) return false;
+
+  // Leaders/admin: full access
+  if (user.role === "to_truong" || user.role === "to_pho" || user.role === "admin") {
+    return true;
+  }
+
+  if (user.role !== "can_bo") return false;
+
+  // Staff: access determined by task
+  const task = user.task || "";
+  const allowedByTask: Record<string, string[]> = {
+    // As requested: cán bộ hộ khẩu/nhân khẩu được làm cả tạm trú/tạm vắng
+    hokhau_nhankhau: [
+      "/dashboard",
+      "/ho-khau",
+      "/nhan-khau",
+      "/requests",
+      "/tam-tru-vang",
+    ],
+    tamtru_tamvang: ["/dashboard", "/requests", "/tam-tru-vang"],
+    kiennghi: ["/dashboard", "/phan-anh"],
+    thongke: ["/dashboard", "/thong-ke", "/bao-cao"],
+  };
+
+  const allowed = allowedByTask[task] || ["/dashboard"]; // safe default
+  return allowed.includes(path);
+}
+
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -31,11 +61,9 @@ export default function Layout({ children }: LayoutProps) {
     { path: "/ho-khau", label: "Hộ khẩu", icon: "🏠" },
     { path: "/nhan-khau", label: "Nhân khẩu", icon: "👥" },
     { path: "/requests", label: "Yêu cầu", icon: "📋" },
-    { path: "/bien-dong", label: "Biến động", icon: "📝" },
     { path: "/tam-tru-vang", label: "Tạm trú / Tạm vắng", icon: "📍" },
     { path: "/phan-anh", label: "Phản ánh", icon: "💬" },
-    { path: "/thong-ke", label: "Thống kê", icon: "📈" },
-    { path: "/bao-cao", label: "Báo cáo", icon: "📄" }
+    { path: "/thong-ke", label: "Thống kê", icon: "📈" }
   ];
 
   useEffect(() => {
@@ -108,13 +136,7 @@ export default function Layout({ children }: LayoutProps) {
         <nav className="flex-1 overflow-y-auto p-4 space-y-1">
           <ul className="space-y-1">
             {menuItems
-              .filter((item) => {
-                // Chỉ hiển thị menu "Yêu cầu" cho to_truong và can_bo
-                if (item.path === "/requests") {
-                  return userInfo?.role === "to_truong" || userInfo?.role === "can_bo";
-                }
-                return true;
-              })
+              .filter((item) => canAccessPath(userInfo, item.path))
               .map((item) => {
                 const isActive = location.pathname === item.path;
                 return (

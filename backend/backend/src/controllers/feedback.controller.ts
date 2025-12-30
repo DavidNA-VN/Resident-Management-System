@@ -35,7 +35,15 @@ export const feedbackController = {
 
   async list(req: Request, res: Response, next: NextFunction) {
     try {
-      const { page = 1, limit = 10, status, category } = req.query;
+      const {
+        page = 1,
+        limit = 10,
+        status,
+        category,
+        keyword,
+        reporterKeyword,
+        includeMerged,
+      } = req.query as any;
       let { userId } = req.query;
 
       if (req.user?.role === "nguoi_dan") {
@@ -59,10 +67,37 @@ export const feedbackController = {
         params.push(userId);
       }
 
+      if (keyword) {
+        where.push(`(pa."tieuDe" ILIKE $${idx} OR pa."noiDung" ILIKE $${idx})`);
+        params.push(`%${String(keyword).trim()}%`);
+        idx++;
+      }
+
+      if (reporterKeyword) {
+        where.push(`EXISTS (
+          SELECT 1
+          FROM phan_anh_nguoi pan
+          JOIN users u ON pan."nguoiPhanAnhId" = u.id
+          WHERE pan."phanAnhId" = pa.id
+            AND (
+              u."fullName" ILIKE $${idx}
+              OR u.username ILIKE $${idx}
+              OR COALESCE(u.cccd, '') ILIKE $${idx}
+            )
+        )`);
+        params.push(`%${String(reporterKeyword).trim()}%`);
+        idx++;
+      }
+
       // SỬA TẠI ĐÂY: Nếu không phải người dân xem đơn của mình, ẩn các đơn đã bị gộp
       // Điều này giúp danh sách của Tổ trưởng gọn gàng, chỉ hiện đơn "Chính"
-      if (req.user?.role !== "nguoi_dan") {
-        where.push(`(pa."ketQuaXuLy" IS NULL OR pa."ketQuaXuLy" NOT LIKE 'Đã gộp vào phản ánh ID: %')`);
+      const includeMergedFlag =
+        String(includeMerged || "").toLowerCase() === "1" ||
+        String(includeMerged || "").toLowerCase() === "true";
+      if (req.user?.role !== "nguoi_dan" && !includeMergedFlag) {
+        where.push(
+          `(pa."ketQuaXuLy" IS NULL OR pa."ketQuaXuLy" NOT LIKE 'Đã gộp vào phản ánh ID: %')`
+        );
       }
 
       const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -71,7 +106,17 @@ export const feedbackController = {
       const sql = `
         SELECT pa.*, 
           (
-            SELECT COALESCE(JSON_AGG(u."fullName"), '[]'::json) 
+            SELECT COALESCE(
+              JSON_AGG(
+                JSON_BUILD_OBJECT(
+                  'id', u.id,
+                  'fullName', u."fullName",
+                  'username', u.username,
+                  'cccd', u.cccd
+                )
+              ),
+              '[]'::json
+            )
             FROM phan_anh_nguoi pan 
             JOIN users u ON pan."nguoiPhanAnhId" = u.id 
             WHERE pan."phanAnhId" = pa.id

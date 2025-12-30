@@ -1,9 +1,101 @@
 import { Router } from "express";
 import { query, pool } from "../db";
-import { requireAuth, requireRole } from "../middlewares/auth.middleware";
+import { requireAnyTask, requireAuth, requireRole } from "../middlewares/auth.middleware";
 import { getCurrentDateString, normalizeDateOnly } from "../utils/date";
 
 const router = Router();
+
+type PrecheckWarning = {
+  code: string;
+  message: string;
+  details?: any;
+};
+
+function extractCccdCandidates(type: string, payload: any): string[] {
+  const candidates: string[] = [];
+  const safePush = (value: any) => {
+    const s = typeof value === "string" ? value.trim() : "";
+    if (s) candidates.push(s);
+  };
+
+  // Common patterns
+  safePush(payload?.cccd);
+  safePush(payload?.person?.cccd);
+  safePush(payload?.newborn?.cccd);
+  safePush(payload?.nhanKhau?.cccd);
+  safePush(payload?.citizen?.cccd);
+
+  // Temporary residence/absence payloads
+  safePush(payload?.residence?.cccd);
+  safePush(payload?.absence?.cccd);
+  safePush(payload?.residence?.person?.cccd);
+  safePush(payload?.absence?.person?.cccd);
+
+  // Deduplicate
+  return Array.from(new Set(candidates));
+}
+
+async function buildPrecheckWarnings(opts: {
+  type: string;
+  payload: any;
+  targetHouseholdId?: number | null;
+  targetPersonId?: number | null;
+}): Promise<PrecheckWarning[]> {
+  const warnings: PrecheckWarning[] = [];
+
+  const payload = opts.payload || {};
+  const cccds = extractCccdCandidates(opts.type, payload);
+  const targetPersonId = opts.targetPersonId ? Number(opts.targetPersonId) : null;
+  const targetHouseholdId = opts.targetHouseholdId
+    ? Number(opts.targetHouseholdId)
+    : null;
+
+  // 1) Duplicate CCCD (global check)
+  for (const cccd of cccds) {
+    const existed = await query(
+      `SELECT id, "hoKhauId", "hoTen" FROM nhan_khau WHERE cccd = $1 LIMIT 5`,
+      [cccd]
+    );
+    if ((existed?.rowCount ?? 0) > 0) {
+      const rows = existed.rows || [];
+      // Allow update of the same person (targetPersonId)
+      const conflicts = targetPersonId
+        ? rows.filter((r: any) => Number(r.id) !== Number(targetPersonId))
+        : rows;
+      if (conflicts.length > 0) {
+        warnings.push({
+          code: "DUPLICATE_CCCD",
+          message: `CCCD ${cccd} đã tồn tại trong hệ thống (${conflicts.length} bản ghi)` ,
+          details: conflicts.map((r: any) => ({
+            id: Number(r.id),
+            hoKhauId: r.hoKhauId ? Number(r.hoKhauId) : null,
+            hoTen: r.hoTen || null,
+          })),
+        });
+      }
+    }
+  }
+
+  // 2) Second head of household (when creating/adding a person with quanHe=chu_ho)
+  const quanHe =
+    String(payload?.person?.quanHe || payload?.nhanKhau?.quanHe || "").toLowerCase();
+  if (quanHe === "chu_ho" && targetHouseholdId) {
+    const hasChuHo = await query(
+      `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 AND LOWER("quanHe") = 'chu_ho' LIMIT 1`,
+      [targetHouseholdId]
+    );
+    if ((hasChuHo?.rowCount ?? 0) > 0) {
+      warnings.push({
+        code: "DUPLICATE_HEAD",
+        message:
+          "Hộ khẩu đã có Chủ hộ, không thể thêm một Chủ hộ thứ hai",
+        details: { existingChuHoId: Number(hasChuHo.rows[0].id) },
+      });
+    }
+  }
+
+  return warnings;
+}
 
 // Enum cho các loại request (mở rộng)
 export enum RequestType {
@@ -223,7 +315,38 @@ router.post(
         type === RequestType.TEMPORARY_RESIDENCE ||
         type === "TAM_TRU"
       ) {
+        // Default target household to current head's household
+        finalTargetHouseholdId = headContext.householdId;
+
+        // For temporary residence, "diaChi" is now used to carry the household code (soHoKhau)
+        // and must be fixed to the logged-in head's household.
+        const household = await query(
+          `SELECT "soHoKhau" FROM ho_khau WHERE id = $1`,
+          [headContext.householdId]
+        );
+        const soHoKhau = household?.rows?.[0]?.soHoKhau;
+        if (!soHoKhau) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "Không lấy được số hộ khẩu của chủ hộ",
+            },
+          });
+        }
+
+        const residenceData =
+          payload?.residence && typeof payload.residence === "object"
+            ? payload.residence
+            : payload;
+        // Keep backward-compatible key "diaChi" while also storing "soHoKhau"
+        residenceData.soHoKhau = soHoKhau;
+        residenceData.diaChi = soHoKhau;
+        payload.soHoKhau = soHoKhau;
+        payload.diaChi = soHoKhau;
+
         validationError = validateTemporaryResidencePayload(payload);
+
         const nhanKhauId =
           payload?.nhanKhauId || payload?.residence?.nhanKhauId || null;
         if (nhanKhauId) {
@@ -247,6 +370,9 @@ router.post(
         type === RequestType.TEMPORARY_ABSENCE ||
         type === "TAM_VANG"
       ) {
+        // Default target household to current head's household
+        finalTargetHouseholdId = headContext.householdId;
+
         validationError = validateTemporaryAbsencePayload(payload);
         const nhanKhauId =
           payload?.nhanKhauId || payload?.absence?.nhanKhauId || null;
@@ -314,6 +440,72 @@ router.post(
         payload.hoKhauId = headContext.householdId;
       } else if (type === RequestType.DECEASED) {
         validationError = validateDeceasedPayload(payload);
+        // Always attach household context for auditing/listing
+        finalTargetHouseholdId = headContext.householdId;
+        const nhanKhauId = payload?.nhanKhauId || payload?.personId;
+        if (nhanKhauId) {
+          try {
+            await ensurePersonInHousehold(
+              Number(nhanKhauId),
+              headContext.householdId
+            );
+          } catch (err: any) {
+            return res.status(err.status || 400).json({
+              success: false,
+              error: {
+                code: err.code || "VALIDATION_ERROR",
+                message: err.message,
+              },
+            });
+          }
+          finalTargetPersonId = Number(nhanKhauId);
+        }
+      } else if (type === RequestType.UPDATE_PERSON) {
+        validationError = validateUpdatePersonPayload(payload);
+        const nhanKhauId = payload?.nhanKhauId || payload?.personId;
+        if (nhanKhauId) {
+          try {
+            await ensurePersonInHousehold(
+              Number(nhanKhauId),
+              headContext.householdId
+            );
+          } catch (err: any) {
+            return res.status(err.status || 400).json({
+              success: false,
+              error: {
+                code: err.code || "VALIDATION_ERROR",
+                message: err.message,
+              },
+            });
+          }
+          finalTargetHouseholdId = headContext.householdId;
+          finalTargetPersonId = Number(nhanKhauId);
+        }
+      } else if (type === RequestType.REMOVE_PERSON) {
+        validationError = validateRemovePersonPayload(payload);
+        const nhanKhauId = payload?.nhanKhauId || payload?.personId;
+        if (nhanKhauId) {
+          try {
+            await ensurePersonInHousehold(
+              Number(nhanKhauId),
+              headContext.householdId
+            );
+          } catch (err: any) {
+            return res.status(err.status || 400).json({
+              success: false,
+              error: {
+                code: err.code || "VALIDATION_ERROR",
+                message: err.message,
+              },
+            });
+          }
+          finalTargetHouseholdId = headContext.householdId;
+          finalTargetPersonId = Number(nhanKhauId);
+        }
+      } else if (type === RequestType.MOVE_OUT) {
+        validationError = validateMoveOutPayload(payload);
+        // Always attach household context for auditing/listing
+        finalTargetHouseholdId = headContext.householdId;
         const nhanKhauId = payload?.nhanKhauId || payload?.personId;
         if (nhanKhauId) {
           try {
@@ -403,7 +595,7 @@ router.post(
 router.get(
   "/tam-tru-vang/requests",
   requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
+  requireAnyTask(["hokhau_nhankhau", "tamtru_tamvang"]),
   async (req, res, next) => {
     try {
       const {
@@ -659,7 +851,7 @@ router.get(
 router.post(
   "/tam-tru-vang/requests/:id/approve",
   requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
+  requireAnyTask(["hokhau_nhankhau", "tamtru_tamvang"]),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.id);
@@ -775,6 +967,9 @@ router.post(
           const cccd = personPayload?.cccd
             ? String(personPayload.cccd).trim()
             : null;
+          const lyDoKhongCoCCCD = personPayload?.lyDoKhongCoCCCD
+            ? String(personPayload.lyDoKhongCoCCCD).trim()
+            : null;
           const ngaySinh = personPayload?.ngaySinh || null;
           const gioiTinh = personPayload?.gioiTinh || null;
           const noiSinh = String(personPayload?.noiSinh || "").trim();
@@ -815,23 +1010,32 @@ router.post(
           }
 
           if (!nhanKhauId) {
+            const normalizedCccd = cccd ? String(cccd).trim() : "";
+            const processedLyDoKhongCoCCCD = !normalizedCccd
+              ? String(lyDoKhongCoCCCD || personPayload?.ghiChu || "").trim() || null
+              : null;
+            const processedGhiChu =
+              normalizedCccd || lyDoKhongCoCCCD
+                ? (personPayload?.ghiChu ? String(personPayload.ghiChu).trim() : null)
+                : null;
+
             const insertPerson = await query(
               `INSERT INTO nhan_khau (
                 "hoTen", cccd, "ngaySinh", "gioiTinh", "noiSinh",
                 "nguyenQuan", "danToc", "tonGiao", "quocTich",
                 "ngayDangKyThuongTru", "diaChiThuongTruTruoc",
-                "ngheNghiep", "noiLamViec", "ghiChu",
+                "ngheNghiep", "noiLamViec", "ghiChu", "lyDoKhongCoCCCD",
                 "hoKhauId", "quanHe", "trangThai"
               ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9,
                 $10, $11,
-                $12, $13, $14,
-                $15, $16, $17
+                $12, $13, $14, $15,
+                $16, $17, $18
               ) RETURNING id`,
               [
                 hoTen,
-                cccd,
+                normalizedCccd ? normalizedCccd : null,
                 ngaySinh,
                 gioiTinh,
                 noiSinh,
@@ -843,7 +1047,8 @@ router.post(
                 personPayload?.diaChiThuongTruTruoc || null,
                 personPayload?.ngheNghiep || null,
                 personPayload?.noiLamViec || null,
-                personPayload?.ghiChu || null,
+                processedGhiChu,
+                processedLyDoKhongCoCCCD,
                 hoKhauId,
                 quanHe,
                 "active",
@@ -943,7 +1148,7 @@ router.post(
 router.get(
   "/tam-tru-vang/requests/:id",
   requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
+  requireAnyTask(["hokhau_nhankhau", "tamtru_tamvang"]),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.id);
@@ -958,48 +1163,126 @@ router.get(
         });
       }
 
+      const typeToLoai = (t: any) => {
+        const s = String(t || "").toUpperCase();
+        if (s.includes("ABSENCE") || s.includes("VANG")) return "tam_vang";
+        if (s.includes("RESIDENCE") || s.includes("TRU")) return "tam_tru";
+        return null;
+      };
+
+      // 1) Try to load from requests table
+      let row: any = null;
+      let source: "requests" | "tam_tru_vang" = "requests";
+
       const result = await query(
         `SELECT
-        r.id, r.type, r.status, r."createdAt", r."reviewedAt", r."reviewedBy", r."rejectionReason",
-        r."requesterUserId", r."targetPersonId",
-        (r.payload->>'tuNgay') as "tuNgay",
-        (r.payload->>'denNgay') as "denNgay",
-        (r.payload->>'lyDo') as "lyDo",
-        (r.payload->>'diaChi') as "diaChi",
-        r.payload,
-        u."fullName" as "requesterName",
-        nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
-        hk.id as "householdId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress"
-      FROM requests r
-      LEFT JOIN users u ON r."requesterUserId" = u.id
-      LEFT JOIN nhan_khau nk ON r."targetPersonId" = nk.id
-      LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
-      WHERE r.id = $1 AND r.type IN ('TEMPORARY_RESIDENCE', 'TEMPORARY_ABSENCE', 'TAM_TRU', 'TAM_VANG')`,
+          r.id, r.type, r.status, r."createdAt", r."reviewedAt", r."reviewedBy", r."rejectionReason",
+          r."requesterUserId", r."targetPersonId",
+          (r.payload->>'tuNgay') as "tuNgay",
+          (r.payload->>'denNgay') as "denNgay",
+          (r.payload->>'lyDo') as "lyDo",
+          (r.payload->>'diaChi') as "diaChi",
+          r.payload,
+          u."fullName" as "requesterName",
+          nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
+          hk.id as "householdId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress",
+          chu.id as "chuHoPersonId", chu."hoTen" as "chuHoName", chu.cccd as "chuHoCccd"
+        FROM requests r
+        LEFT JOIN users u ON r."requesterUserId" = u.id
+        LEFT JOIN nhan_khau nk ON r."targetPersonId" = nk.id
+        LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+        LEFT JOIN nhan_khau chu ON hk."chuHoId" = chu.id
+        WHERE r.id = $1 AND r.type IN ('TEMPORARY_RESIDENCE', 'TEMPORARY_ABSENCE', 'TAM_TRU', 'TAM_VANG')`,
         [requestId]
       );
 
-      if ((result?.rowCount ?? 0) === 0) {
-        return res.status(404).json({
-          success: false,
-          error: { code: "NOT_FOUND", message: "Yêu cầu không tồn tại" },
-        });
+      if ((result?.rowCount ?? 0) > 0) {
+        row = result.rows[0];
+      } else {
+        // 2) Fallback: the list endpoint also returns rows from tam_tru_vang table with id=ttv.id
+        source = "tam_tru_vang";
+        const ttvResult = await query(
+          `SELECT
+            ttv.id,
+            CASE WHEN ttv.loai = 'tam_tru' THEN 'TEMPORARY_RESIDENCE' ELSE 'TEMPORARY_ABSENCE' END AS type,
+            CASE ttv."trangThai"
+              WHEN 'cho_duyet' THEN 'PENDING'
+              WHEN 'da_duyet' THEN 'APPROVED'
+              WHEN 'tu_choi' THEN 'REJECTED'
+              ELSE ttv."trangThai"
+            END AS status,
+            ttv."createdAt",
+            ttv."updatedAt" AS "reviewedAt",
+            ttv."nguoiDuyet" AS "reviewedBy",
+            NULL::text AS "rejectionReason",
+            ttv."nguoiDangKy" AS "requesterUserId",
+            ttv."nhanKhauId" AS "targetPersonId",
+            ttv."tuNgay"::text AS "tuNgay",
+            ttv."denNgay"::text AS "denNgay",
+            ttv."lyDo" AS "lyDo",
+            ttv."diaChi" AS "diaChi",
+            ttv.attachments AS payload,
+            u."fullName" AS "requesterName",
+            nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
+            hk.id as "householdId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress",
+            chu.id as "chuHoPersonId", chu."hoTen" as "chuHoName", chu.cccd as "chuHoCccd"
+          FROM tam_tru_vang ttv
+          LEFT JOIN users u ON ttv."nguoiDangKy" = u.id
+          LEFT JOIN nhan_khau nk ON ttv."nhanKhauId" = nk.id
+          LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+          LEFT JOIN nhan_khau chu ON hk."chuHoId" = chu.id
+          WHERE ttv.id = $1`,
+          [requestId]
+        );
+
+        if ((ttvResult?.rowCount ?? 0) === 0) {
+          return res.status(404).json({
+            success: false,
+            error: { code: "NOT_FOUND", message: "Yêu cầu không tồn tại" },
+          });
+        }
+
+        row = ttvResult.rows[0];
       }
 
-      const row = result.rows[0];
       let attachments = [];
+      let parsedPayload: any = null;
       try {
-        const parsedPayload =
-          typeof row.payload === "string"
-            ? JSON.parse(row.payload)
-            : row.payload;
-        attachments = parsedPayload?.attachments || [];
+        parsedPayload =
+          typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+
+        // requests.payload has { attachments: [...] }, while tam_tru_vang.attachments is already an array
+        if (Array.isArray(parsedPayload)) attachments = parsedPayload;
+        else attachments = parsedPayload?.attachments || [];
       } catch (e) {
         attachments = [];
+        parsedPayload = row.payload;
       }
+
+      const loai = typeToLoai(row.type);
+
+      // Applicant is the household head (chu ho) as per business rule; fallback to requesterName
+      const applicant = {
+        id: row.chuHoPersonId || null,
+        hoTen: row.chuHoName || row.requesterName || null,
+        cccd: row.chuHoCccd || null,
+      };
+
+      // Subject is the related person being registered (prefer payload.person if present)
+      const subjectFromPayload = parsedPayload?.person || null;
+      const subject = {
+        id: row.personId || null,
+        hoTen: subjectFromPayload?.hoTen || row.personName || null,
+        cccd: subjectFromPayload?.cccd || row.personCccd || null,
+        ngaySinh: subjectFromPayload?.ngaySinh || null,
+        gioiTinh: subjectFromPayload?.gioiTinh || null,
+        quanHe: subjectFromPayload?.quanHe || null,
+      };
 
       const detail = {
         id: row.id,
         type: row.type,
+        loai,
         status: row.status,
         tuNgay: row.tuNgay,
         denNgay: row.denNgay,
@@ -1011,6 +1294,8 @@ router.get(
         reviewedAt: row.reviewedAt,
         createdAt: row.createdAt,
         requesterName: row.requesterName,
+        applicant,
+        subject,
         person: row.personId
           ? { id: row.personId, hoTen: row.personName, cccd: row.personCccd }
           : null,
@@ -1022,7 +1307,8 @@ router.get(
             }
           : null,
         attachments: attachments,
-        payload: row.payload,
+        payload: parsedPayload,
+        source,
       };
 
       return res.json({ success: true, data: detail });
@@ -1038,7 +1324,7 @@ router.get(
 router.post(
   "/tam-tru-vang/requests/:id/reject",
   requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
+  requireAnyTask(["hokhau_nhankhau", "tamtru_tamvang"]),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.id);
@@ -1129,36 +1415,50 @@ function validateAddPersonPayload(
   hasTargetHouseholdId: boolean = false
 ): string | null {
   const person = payload.person || payload;
-  const requiredFields = ["hoTen", "ngaySinh", "gioiTinh", "noiSinh"];
+  const requiredFields = [
+    "hoTen",
+    "cccd",
+    "ngaySinh",
+    "gioiTinh",
+    "quanHe",
+    "noiSinh",
+    "nguyenQuan",
+    "danToc",
+    "tonGiao",
+    "quocTich",
+    "ngheNghiep",
+    "noiLamViec",
+    "ngayDangKyThuongTru",
+    "diaChiThuongTruTruoc",
+  ];
 
-  const missingFields = requiredFields.filter((field) => !person[field]);
+  const missingFields = requiredFields.filter(
+    (field) =>
+      person[field] === undefined ||
+      person[field] === null ||
+      String(person[field]).trim() === ""
+  );
   if (missingFields.length > 0) {
-    return `Thiếu các trường bắt buộc: ${missingFields.join(", ")}`;
+    return "Thiếu các trường bắt buộc (trừ Ghi chú)";
   }
 
   if (person.gioiTinh && !["nam", "nu", "khac"].includes(person.gioiTinh)) {
     return "Giới tính phải là 'nam', 'nu', hoặc 'khac'";
   }
 
-  // Nếu không có targetHouseholdId (user chưa linked), cần quanHe
-  if (!hasTargetHouseholdId) {
-    if (!person.quanHe) {
-      return "Bạn cần chỉ định quan hệ với chủ hộ trong hộ khẩu bạn muốn gia nhập";
-    }
-
-    const validQuanHe = [
-      "chu_ho",
-      "vo_chong",
-      "con",
-      "cha_me",
-      "anh_chi_em",
-      "ong_ba",
-      "chau",
-      "khac",
-    ];
-    if (!validQuanHe.includes(person.quanHe)) {
-      return "Quan hệ không hợp lệ";
-    }
+  // Validate quanHe
+  const validQuanHe = [
+    "chu_ho",
+    "vo_chong",
+    "con",
+    "cha_me",
+    "anh_chi_em",
+    "ong_ba",
+    "chau",
+    "khac",
+  ];
+  if (!validQuanHe.includes(String(person.quanHe).toLowerCase())) {
+    return "Quan hệ không hợp lệ";
   }
 
   return null;
@@ -1167,17 +1467,35 @@ function validateAddPersonPayload(
 function validateTemporaryResidencePayload(payload: any): string | null {
   const residenceData = payload.residence || payload;
 
-  // Required fields
-  const requiredFields = ["nhanKhauId", "tuNgay", "diaChi", "lyDo"];
+  const personPayload =
+    (payload?.person && typeof payload.person === "object" && payload.person) ||
+    (payload?.nhanKhau && typeof payload.nhanKhau === "object" && payload.nhanKhau) ||
+    (residenceData?.person && typeof residenceData.person === "object" &&
+      residenceData.person) ||
+    null;
+
+  const nhanKhauIdRaw =
+    residenceData?.nhanKhauId ?? payload?.nhanKhauId ?? payload?.personId ?? null;
+  const nhanKhauIdNum =
+    nhanKhauIdRaw !== null && nhanKhauIdRaw !== undefined && nhanKhauIdRaw !== ""
+      ? Number(nhanKhauIdRaw)
+      : null;
+
+  // Required fields (nhanKhauId is optional if person payload is provided)
+  const requiredFields = ["tuNgay", "lyDo"];
   const missingFields = requiredFields.filter((field) => !residenceData[field]);
   if (missingFields.length > 0) {
     return `Thiếu các trường bắt buộc: ${missingFields.join(", ")}`;
   }
 
-  // Validate nhanKhauId exists
-  const nhanKhauId = residenceData.nhanKhauId;
-  if (!Number.isInteger(nhanKhauId) || nhanKhauId <= 0) {
-    return "nhanKhauId phải là số nguyên dương";
+  if (!nhanKhauIdNum && !personPayload) {
+    return "Thiếu thông tin nhân khẩu (nhanKhauId hoặc person)";
+  }
+
+  if (nhanKhauIdNum !== null) {
+    if (!Number.isInteger(nhanKhauIdNum) || nhanKhauIdNum <= 0) {
+      return "nhanKhauId phải là số nguyên dương";
+    }
   }
 
   // Validate dates
@@ -1201,9 +1519,10 @@ function validateTemporaryResidencePayload(payload: any): string | null {
     return "lyDo không được để trống";
   }
 
-  // Validate diaChi is not empty
-  if (residenceData.diaChi.trim().length === 0) {
-    return "diaChi không được để trống";
+  // Validate household code (soHoKhau) / legacy diaChi
+  const codeOrAddress = residenceData.soHoKhau || residenceData.diaChi;
+  if (!codeOrAddress || String(codeOrAddress).trim().length === 0) {
+    return "soHoKhau không được để trống";
   }
 
   return null;
@@ -1212,17 +1531,34 @@ function validateTemporaryResidencePayload(payload: any): string | null {
 function validateTemporaryAbsencePayload(payload: any): string | null {
   const absenceData = payload.absence || payload;
 
-  // Required fields
-  const requiredFields = ["nhanKhauId", "tuNgay", "lyDo"];
+  const personPayload =
+    (payload?.person && typeof payload.person === "object" && payload.person) ||
+    (payload?.nhanKhau && typeof payload.nhanKhau === "object" && payload.nhanKhau) ||
+    (absenceData?.person && typeof absenceData.person === "object" && absenceData.person) ||
+    null;
+
+  const nhanKhauIdRaw =
+    absenceData?.nhanKhauId ?? payload?.nhanKhauId ?? payload?.personId ?? null;
+  const nhanKhauIdNum =
+    nhanKhauIdRaw !== null && nhanKhauIdRaw !== undefined && nhanKhauIdRaw !== ""
+      ? Number(nhanKhauIdRaw)
+      : null;
+
+  // Required fields (nhanKhauId is optional if person payload is provided)
+  const requiredFields = ["tuNgay", "lyDo"];
   const missingFields = requiredFields.filter((field) => !absenceData[field]);
   if (missingFields.length > 0) {
     return `Thiếu các trường bắt buộc: ${missingFields.join(", ")}`;
   }
 
-  // Validate nhanKhauId exists
-  const nhanKhauId = absenceData.nhanKhauId;
-  if (!Number.isInteger(nhanKhauId) || nhanKhauId <= 0) {
-    return "nhanKhauId phải là số nguyên dương";
+  if (!nhanKhauIdNum && !personPayload) {
+    return "Thiếu thông tin nhân khẩu (nhanKhauId hoặc person)";
+  }
+
+  if (nhanKhauIdNum !== null) {
+    if (!Number.isInteger(nhanKhauIdNum) || nhanKhauIdNum <= 0) {
+      return "nhanKhauId phải là số nguyên dương";
+    }
   }
 
   // Validate dates
@@ -1311,6 +1647,137 @@ function validateDeceasedPayload(payload: any): string | null {
   return null;
 }
 
+function validateUpdatePersonPayload(payload: any): string | null {
+  if (!payload || typeof payload !== "object") {
+    return "Thiếu dữ liệu sửa nhân khẩu";
+  }
+
+  const nhanKhauId = payload.nhanKhauId || payload.personId;
+  if (!nhanKhauId || !Number.isInteger(Number(nhanKhauId))) {
+    return "Vui lòng chọn nhân khẩu cần sửa";
+  }
+
+  const lyDo = payload.lyDo || payload.reason;
+  if (!lyDo || String(lyDo).trim() === "") {
+    return "Vui lòng nhập lý do sửa";
+  }
+
+  // CCCD updates are allowed only when the current person has no CCCD.
+  // This constraint is enforced at approval time (needs DB state).
+  // Here we only validate internal consistency.
+  const hasAnyCccdField =
+    (typeof payload.cccd === "string" && payload.cccd.trim() !== "") ||
+    (typeof payload.ngayCapCCCD === "string" && payload.ngayCapCCCD.trim() !== "") ||
+    (typeof payload.noiCapCCCD === "string" && payload.noiCapCCCD.trim() !== "");
+  if (hasAnyCccdField) {
+    const cccd = String(payload.cccd || "").trim();
+    if (!cccd) {
+      return "Vui lòng nhập CCCD/CMND";
+    }
+    if (payload.ngayCapCCCD) {
+      const d = new Date(payload.ngayCapCCCD);
+      if (isNaN(d.getTime())) {
+        return "Ngày cấp CCCD/CMND không hợp lệ";
+      }
+    }
+  }
+
+  if (payload.ngaySinh) {
+    const d = new Date(payload.ngaySinh);
+    if (isNaN(d.getTime())) {
+      return "Ngày sinh không hợp lệ";
+    }
+  }
+
+  if (payload.gioiTinh) {
+    const gt = String(payload.gioiTinh).toLowerCase();
+    if (!["nam", "nu", "khac"].includes(gt)) {
+      return "Giới tính không hợp lệ";
+    }
+  }
+
+  const updatableKeys = [
+    "hoTen",
+    "biDanh",
+    "ngaySinh",
+    "gioiTinh",
+    "noiSinh",
+    "nguyenQuan",
+    "danToc",
+    "tonGiao",
+    "quocTich",
+    "cccd",
+    "ngayCapCCCD",
+    "noiCapCCCD",
+    "quanHe",
+    "ngayDangKyThuongTru",
+    "ngheNghiep",
+    "noiLamViec",
+    "diaChiThuongTruTruoc",
+    "ghiChu",
+    "ghiChuHoKhau",
+    "lyDoKhongCoCCCD",
+  ];
+
+  const hasAnyChange = updatableKeys.some((k) => {
+    const v = (payload as any)[k];
+    if (v === null || v === undefined) return false;
+    if (typeof v === "string") return v.trim() !== "";
+    return true;
+  });
+
+  if (!hasAnyChange) {
+    return "Vui lòng nhập ít nhất một thông tin cần sửa";
+  }
+
+  return null;
+}
+
+function validateRemovePersonPayload(payload: any): string | null {
+  if (!payload || typeof payload !== "object") {
+    return "Thiếu dữ liệu xoá nhân khẩu";
+  }
+
+  const nhanKhauId = payload.nhanKhauId || payload.personId;
+  if (!nhanKhauId || !Number.isInteger(Number(nhanKhauId))) {
+    return "Vui lòng chọn nhân khẩu cần xoá";
+  }
+
+  const lyDo = payload.lyDo || payload.reason;
+  if (!lyDo || String(lyDo).trim() === "") {
+    return "Vui lòng nhập lý do xoá";
+  }
+
+  return null;
+}
+
+function validateMoveOutPayload(payload: any): string | null {
+  if (!payload || typeof payload !== "object") {
+    return "Thiếu dữ liệu chuyển đi";
+  }
+
+  const nhanKhauId = payload.nhanKhauId || payload.personId;
+  if (!nhanKhauId || !Number.isInteger(Number(nhanKhauId))) {
+    return "Vui lòng chọn nhân khẩu cần chuyển đi";
+  }
+
+  const ngayChuyen = payload.ngayChuyen || payload.ngayDi || payload.ngayThucHien;
+  if (!ngayChuyen) {
+    return "Vui lòng nhập ngày chuyển đi";
+  }
+  const ngayDate = new Date(ngayChuyen);
+  if (isNaN(ngayDate.getTime())) {
+    return "Ngày chuyển đi không hợp lệ";
+  }
+
+  const lyDo = payload.lyDo || payload.reason || payload.noiDung;
+  if (!lyDo || String(lyDo).trim() === "") {
+    return "Vui lòng nhập lý do/ghi chú chuyển đi";
+  }
+
+  return null;
+}
+
 /**
  * GET /requests/my
  * Lấy danh sách yêu cầu của người dân hiện tại
@@ -1365,7 +1832,7 @@ router.get(
 router.get(
   "/requests/:id",
   requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
+  requireAnyTask(["hokhau_nhankhau", "tamtru_tamvang"]),
   async (req, res, next) => {
     try {
       const userId = req.user!.id;
@@ -1415,6 +1882,48 @@ router.get(
       }
 
       const row = result.rows[0];
+
+      const parsedPayload =
+        typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+
+      // Related household/person info for leader review
+      let hoKhauLienQuan: any = null;
+      if (row.targetHouseholdId) {
+        const hk = await query(
+          `SELECT id, "soHoKhau", "diaChi" FROM ho_khau WHERE id = $1`,
+          [Number(row.targetHouseholdId)]
+        );
+        if ((hk?.rowCount ?? 0) > 0) {
+          hoKhauLienQuan = {
+            id: Number(hk.rows[0].id),
+            soHoKhau: hk.rows[0].soHoKhau,
+            diaChi: hk.rows[0].diaChi,
+          };
+        }
+      }
+
+      let nhanKhauLienQuan: any = null;
+      if (row.targetPersonId) {
+        const nk = await query(
+          `SELECT id, "hoTen", cccd FROM nhan_khau WHERE id = $1`,
+          [Number(row.targetPersonId)]
+        );
+        if ((nk?.rowCount ?? 0) > 0) {
+          nhanKhauLienQuan = {
+            id: Number(nk.rows[0].id),
+            hoTen: nk.rows[0].hoTen,
+            cccd: nk.rows[0].cccd,
+          };
+        }
+      }
+
+      const precheckWarnings = await buildPrecheckWarnings({
+        type: String(row.type),
+        payload: parsedPayload,
+        targetHouseholdId: row.targetHouseholdId,
+        targetPersonId: row.targetPersonId,
+      });
+
       const data = {
         id: row.id,
         code: row.code,
@@ -1425,14 +1934,14 @@ router.get(
         reviewedAt: row.reviewedAt,
         targetHouseholdId: row.targetHouseholdId,
         targetPersonId: row.targetPersonId,
-        payload:
-          typeof row.payload === "string"
-            ? JSON.parse(row.payload)
-            : row.payload,
+        payload: parsedPayload,
         requesterName: row.requesterName,
         requesterUsername: row.requesterUsername,
         requesterCccd: row.requesterCccd,
         reviewerName: row.reviewerName,
+        hoKhauLienQuan,
+        nhanKhauLienQuan,
+        precheck: { warnings: precheckWarnings },
       };
 
       console.log("[GET /requests/:id] keys=", Object.keys(data));
@@ -1451,7 +1960,7 @@ router.get(
 router.get(
   "/requests",
   requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
+  requireAnyTask(["hokhau_nhankhau", "tamtru_tamvang"]),
   async (req, res, next) => {
     try {
       const { status, type } = req.query;
@@ -1554,7 +2063,7 @@ router.get(
 router.post(
   "/requests/:id/approve",
   requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
+  requireAnyTask(["hokhau_nhankhau", "tamtru_tamvang"]),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.id);
@@ -1622,13 +2131,47 @@ router.post(
 
       // Sử dụng householdId từ body nếu được cung cấp (cho ADD_PERSON), nếu không dùng từ request
       const finalHouseholdId = householdId || request.targetHouseholdId;
-      const handlerResult = await approvalHandler(
-        requestId,
-        payload,
-        reviewerId,
-        finalHouseholdId,
-        request.targetPersonId
-      );
+      let handlerResult: any = null;
+      try {
+        handlerResult = await approvalHandler(
+          requestId,
+          payload,
+          reviewerId,
+          finalHouseholdId,
+          request.targetPersonId
+        );
+      } catch (e: any) {
+        // Normalize known business errors thrown by handlers
+        if (e && typeof e === "object" && (e.code || e.message)) {
+          return res.status(e.status || 400).json({
+            success: false,
+            error: {
+              code: e.code || "APPROVE_FAILED",
+              message: e.message || "Không thể duyệt yêu cầu",
+              details: e.details,
+            },
+          });
+        }
+
+        // Postgres unique violation
+        if (e && e.code === "23505") {
+          const constraint = String(e.constraint || "");
+          const msg =
+            constraint.toLowerCase().includes("cccd")
+              ? "CCCD đã tồn tại trong hệ thống"
+              : "Dữ liệu bị trùng lặp (unique constraint)";
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: "DUPLICATE_VALUE",
+              message: msg,
+              details: { constraint },
+            },
+          });
+        }
+
+        throw e;
+      }
 
       // If handler created a person, set targetPersonId
       if (handlerResult && handlerResult.id) {
@@ -1733,7 +2276,7 @@ router.post(
 router.post(
   "/requests/:id/reject",
   requireAuth,
-  requireRole(["to_truong", "to_pho", "can_bo"]),
+  requireAnyTask(["hokhau_nhankhau", "tamtru_tamvang"]),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.id);
@@ -1803,9 +2346,12 @@ function getApprovalHandler(type: string): ApprovalHandler | null {
   const handlers: Record<string, ApprovalHandler> = {
     [RequestType.ADD_NEWBORN]: processAddNewbornApproval,
     [RequestType.ADD_PERSON]: processAddPersonApproval,
+    [RequestType.UPDATE_PERSON]: processUpdatePersonApproval,
+    [RequestType.REMOVE_PERSON]: processRemovePersonApproval,
     [RequestType.TEMPORARY_RESIDENCE]: processTemporaryResidenceApproval,
     [RequestType.TEMPORARY_ABSENCE]: processTemporaryAbsenceApproval,
     [RequestType.SPLIT_HOUSEHOLD]: processSplitHouseholdApproval,
+    [RequestType.MOVE_OUT]: processMoveOutApproval,
     [RequestType.DECEASED]: processDeceasedApproval,
     // legacy keys
     ["TAM_TRU" as any]: processTemporaryResidenceApproval,
@@ -1903,8 +2449,13 @@ async function processAddNewbornApproval(
     }
 
     // 4. Auto-set fields for newborns
-    const processedGhiChu =
-      ghiChu || (cccd ? "Mới sinh" : "Mới sinh - chưa có CCCD");
+    // - Không nhồi trạng thái/ghi chú hệ thống vào nhan_khau.ghiChu (tránh lẫn với ghi chú hồ sơ)
+    // - Nếu thiếu CCCD thì lưu lý do vào nhan_khau.lyDoKhongCoCCCD
+    const processedLyDoKhongCoCCCD =
+      !cccd || String(cccd).trim() === ""
+        ? "Mới sinh - chưa có CCCD"
+        : null;
+    const processedGhiChu = ghiChu ? String(ghiChu).trim() : null;
     const processedNgheNghiep = null;
     const processedNoiLamViec = null;
     const processedDiaChiThuongTruTruoc = "mới sinh";
@@ -1913,10 +2464,10 @@ async function processAddNewbornApproval(
     const insertResult = await query(
       `INSERT INTO nhan_khau (
         "hoKhauId", "hoTen", cccd, "ngaySinh", "gioiTinh", "noiSinh", "nguyenQuan", "danToc", "tonGiao", "quocTich",
-        "quanHe", "ngayDangKyThuongTru", "diaChiThuongTruTruoc", "ngheNghiep", "noiLamViec", "ghiChu"
+        "quanHe", "ngayDangKyThuongTru", "diaChiThuongTruTruoc", "ngheNghiep", "noiLamViec", "ghiChu", "lyDoKhongCoCCCD"
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        'con', CURRENT_DATE, $11, $12, $13, $14
+        'con', CURRENT_DATE, $11, $12, $13, $14, $15
       ) RETURNING *`,
       [
         householdId,
@@ -1933,7 +2484,20 @@ async function processAddNewbornApproval(
         processedNgheNghiep,
         processedNoiLamViec,
         processedGhiChu,
+        processedLyDoKhongCoCCCD,
       ]
+    );
+
+    // 6. Record newborn movement for consistent UI (movementStatus)
+    await query(
+      `INSERT INTO bien_dong (
+        "nhanKhauId", loai, "ngayThucHien", "noiDung", "diaChiCu", "diaChiMoi",
+        "nguoiThucHien", "canBoXacNhan", "trangThai", "ghiChu"
+      ) VALUES (
+        $1, 'khai_sinh', $2, $3, NULL, NULL,
+        NULL, $4, 'da_duyet', NULL
+      )`,
+      [insertResult.rows[0].id, getCurrentDateString(), "Khai sinh", reviewerId]
     );
 
     const created = insertResult.rows[0];
@@ -1978,6 +2542,7 @@ async function processAddPersonApproval(
     const {
       hoTen,
       cccd,
+      lyDoKhongCoCCCD,
       ngaySinh,
       gioiTinh,
       noiSinh,
@@ -2074,7 +2639,15 @@ async function processAddPersonApproval(
     }
 
     // 6. Auto-set fields for person
-    const processedGhiChu = ghiChu || (cccd ? "" : "Chưa có CCCD");
+    const normalizedCccd = cccd ? String(cccd).trim() : "";
+    const processedLyDoKhongCoCCCD = !normalizedCccd
+      ? String(lyDoKhongCoCCCD || ghiChu || "").trim() || null
+      : null;
+    // Nếu thiếu CCCD và người dùng chưa có field riêng, coi ghiChu là lý do thiếu CCCD (để không làm bẩn ghiChu hồ sơ)
+    const processedGhiChu =
+      normalizedCccd || lyDoKhongCoCCCD
+        ? (ghiChu ? String(ghiChu).trim() : null)
+        : null;
     const processedNgayDangKyThuongTru =
       ngayDangKyThuongTru || getCurrentDateString();
     const processedDiaChiThuongTruTruoc = diaChiThuongTruTruoc || "";
@@ -2083,15 +2656,15 @@ async function processAddPersonApproval(
     const insertResult = await query(
       `INSERT INTO nhan_khau (
         "hoKhauId", "hoTen", cccd, "ngaySinh", "gioiTinh", "noiSinh", "nguyenQuan", "danToc", "tonGiao", "quocTich",
-        "quanHe", "ngayDangKyThuongTru", "diaChiThuongTruTruoc", "ngheNghiep", "noiLamViec", "ghiChu"
+        "quanHe", "ngayDangKyThuongTru", "diaChiThuongTruTruoc", "ngheNghiep", "noiLamViec", "ghiChu", "lyDoKhongCoCCCD"
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16
+        $11, $12, $13, $14, $15, $16, $17
       ) RETURNING *`,
       [
         householdId,
         hoTen.trim(),
-        cccd ? cccd.trim() : null,
+        normalizedCccd ? normalizedCccd : null,
         ngaySinh,
         gioiTinh,
         noiSinh.trim(),
@@ -2105,6 +2678,7 @@ async function processAddPersonApproval(
         ngheNghiep || null,
         noiLamViec || null,
         processedGhiChu,
+        processedLyDoKhongCoCCCD,
       ]
     );
     const created = insertResult.rows[0];
@@ -2137,20 +2711,431 @@ async function processAddPersonApproval(
   }
 }
 
+async function processUpdatePersonApproval(
+  requestId: number,
+  payload: any,
+  reviewerId: number,
+  targetHouseholdId?: number,
+  targetPersonId?: number
+) {
+  await query("BEGIN");
+
+  try {
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+
+    const nhanKhauId =
+      targetPersonId || payload?.nhanKhauId || payload?.personId;
+    if (!nhanKhauId) {
+      throw { code: "VALIDATION_ERROR", message: "Thiếu nhân khẩu cần sửa" };
+    }
+
+    const current = await query(
+      `SELECT id, "hoKhauId", "quanHe", "trangThai", "cccd" FROM nhan_khau WHERE id = $1`,
+      [nhanKhauId]
+    );
+    if ((current?.rowCount ?? 0) === 0) {
+      throw { code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
+    }
+    if (String(current.rows[0].trangThai) === "deleted") {
+      throw { code: "PERSON_DELETED", message: "Nhân khẩu đã bị xoá" };
+    }
+
+    const currentCccd = String(current.rows[0]?.cccd ?? "").trim();
+
+    const payloadCccd = String(payload?.cccd ?? "").trim();
+    const payloadNgayCap = String(payload?.ngayCapCCCD ?? "").trim();
+    const payloadNoiCap = String(payload?.noiCapCCCD ?? "").trim();
+    const hasAnyCccdField =
+      payloadCccd !== "" || payloadNgayCap !== "" || payloadNoiCap !== "";
+
+    // Allow CCCD updates ONLY when the current CCCD is empty (e.g., newborn).
+    if (hasAnyCccdField) {
+      if (currentCccd !== "") {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: "Nhân khẩu đã có CCCD/CMND nên không thể sửa CCCD qua yêu cầu này",
+        };
+      }
+      if (!payloadCccd) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: "Vui lòng nhập CCCD/CMND",
+        };
+      }
+    }
+
+    const allowed: Array<{
+      key: string;
+      col: string;
+      normalize?: (v: any) => any;
+    }> = [
+      { key: "hoTen", col: '"hoTen"', normalize: (v) => String(v).trim() },
+      { key: "biDanh", col: '"biDanh"', normalize: (v) => String(v).trim() },
+      {
+        key: "ngaySinh",
+        col: '"ngaySinh"',
+        normalize: (v) => normalizeDateOnly(v),
+      },
+      { key: "gioiTinh", col: '"gioiTinh"', normalize: (v) => String(v) },
+      { key: "noiSinh", col: '"noiSinh"', normalize: (v) => String(v).trim() },
+      {
+        key: "nguyenQuan",
+        col: '"nguyenQuan"',
+        normalize: (v) => String(v).trim(),
+      },
+      { key: "danToc", col: '"danToc"', normalize: (v) => String(v).trim() },
+      {
+        key: "tonGiao",
+        col: '"tonGiao"',
+        normalize: (v) => String(v).trim(),
+      },
+      {
+        key: "quocTich",
+        col: '"quocTich"',
+        normalize: (v) => String(v).trim(),
+      },
+      // CCCD fields: only accepted when current DB CCCD is empty (validated above)
+      { key: "cccd", col: '"cccd"', normalize: (v) => String(v).trim() },
+      {
+        key: "ngayCapCCCD",
+        col: '"ngayCapCCCD"',
+        normalize: (v) => normalizeDateOnly(v),
+      },
+      {
+        key: "noiCapCCCD",
+        col: '"noiCapCCCD"',
+        normalize: (v) => String(v).trim(),
+      },
+      { key: "quanHe", col: '"quanHe"', normalize: (v) => String(v).trim() },
+      {
+        key: "ngayDangKyThuongTru",
+        col: '"ngayDangKyThuongTru"',
+        normalize: (v) => normalizeDateOnly(v),
+      },
+      {
+        key: "ngheNghiep",
+        col: '"ngheNghiep"',
+        normalize: (v) => String(v).trim(),
+      },
+      {
+        key: "noiLamViec",
+        col: '"noiLamViec"',
+        normalize: (v) => String(v).trim(),
+      },
+      {
+        key: "diaChiThuongTruTruoc",
+        col: '"diaChiThuongTruTruoc"',
+        normalize: (v) => String(v).trim(),
+      },
+      { key: "ghiChu", col: '"ghiChu"', normalize: (v) => String(v).trim() },
+      {
+        key: "ghiChuHoKhau",
+        col: '"ghiChuHoKhau"',
+        normalize: (v) => String(v).trim(),
+      },
+      {
+        key: "lyDoKhongCoCCCD",
+        col: '"lyDoKhongCoCCCD"',
+        normalize: (v) => String(v).trim(),
+      },
+    ];
+
+    const setClauses: string[] = [];
+    const params: any[] = [];
+
+    for (const f of allowed) {
+      const raw = payload?.[f.key];
+      if (raw === undefined) continue;
+
+      const isCccdKey =
+        f.key === "cccd" || f.key === "ngayCapCCCD" || f.key === "noiCapCCCD";
+
+      // Only touch CCCD columns when the request explicitly provides non-empty CCCD data.
+      if (isCccdKey && !hasAnyCccdField) continue;
+
+      const normalized = f.normalize ? f.normalize(raw) : raw;
+
+      // For CCCD keys, ignore empty string to avoid clearing DB values.
+      if (isCccdKey && (normalized === "" || normalized === null)) continue;
+
+      // allow explicit null to clear (for non-CCCD fields)
+      if (normalized === "") {
+        setClauses.push(`${f.col} = NULL`);
+      } else {
+        params.push(normalized);
+        setClauses.push(`${f.col} = $${params.length}`);
+      }
+    }
+
+    if (setClauses.length === 0) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Không có thông tin nào để cập nhật",
+      };
+    }
+
+    const lyDo = String(
+      payload?.lyDo || payload?.reason || "Cập nhật thông tin"
+    ).trim();
+
+    // Chỉ cập nhật các trường được phép; KHÔNG tự động append lý do vào nhan_khau.ghiChu
+    // (lý do đã được lưu vào bien_dong để audit)
+    params.push(nhanKhauId);
+    await query(
+      `UPDATE nhan_khau
+       SET ${setClauses.join(", ")},
+           "updatedAt" = CURRENT_TIMESTAMP
+       WHERE id = $${params.length}`,
+      params
+    );
+
+    await query(
+      `INSERT INTO bien_dong (
+        "nhanKhauId", loai, "ngayThucHien", "noiDung", "diaChiCu", "diaChiMoi",
+        "nguoiThucHien", "canBoXacNhan", "trangThai", "ghiChu"
+      ) VALUES (
+        $1, 'thay_doi_thong_tin', $2, $3, NULL, NULL,
+        $4, $4, 'da_duyet', $5
+      )`,
+      [
+        nhanKhauId,
+        getCurrentDateString(),
+        lyDo,
+        reviewerId,
+        JSON.stringify({ changedFields: setClauses.map((c) => c.split("=")[0].trim()) }),
+      ]
+    );
+
+    await query("COMMIT");
+    return { personId: nhanKhauId, changed: true };
+  } catch (err) {
+    await query("ROLLBACK");
+    throw err;
+  }
+}
+
+async function processRemovePersonApproval(
+  requestId: number,
+  payload: any,
+  reviewerId: number,
+  targetHouseholdId?: number,
+  targetPersonId?: number
+) {
+  await query("BEGIN");
+
+  try {
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+
+    const nhanKhauId =
+      targetPersonId || payload?.nhanKhauId || payload?.personId;
+    if (!nhanKhauId) {
+      throw { code: "VALIDATION_ERROR", message: "Thiếu nhân khẩu cần xoá" };
+    }
+
+    const person = await query(
+      `SELECT id, "hoKhauId", "quanHe", "trangThai" FROM nhan_khau WHERE id = $1`,
+      [nhanKhauId]
+    );
+    if ((person?.rowCount ?? 0) === 0) {
+      throw { code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
+    }
+
+    const row = person.rows[0];
+    if (String(row.trangThai) === "deleted") {
+      throw { code: "PERSON_DELETED", message: "Nhân khẩu đã bị xoá" };
+    }
+    if (String(row.quanHe) === "chu_ho") {
+      throw {
+        code: "CANNOT_DELETE_HEAD",
+        message: "Không thể xoá Chủ hộ. Vui lòng đổi Chủ hộ trước.",
+      };
+    }
+
+    const lyDo = String(payload?.lyDo || payload?.reason || "Xoá nhân khẩu").trim();
+    const noteLine = `Xoá nhân khẩu (${getCurrentDateString()}): ${lyDo}`;
+
+    await query(
+      `UPDATE nhan_khau
+       SET "trangThai" = 'deleted',
+           "ghiChu" = CASE
+             WHEN "ghiChu" IS NULL OR trim("ghiChu") = '' THEN $2
+             ELSE ("ghiChu" || E'\\n' || $2)
+           END,
+           "updatedAt" = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [nhanKhauId, noteLine]
+    );
+
+    await query("COMMIT");
+    return { personId: nhanKhauId, deleted: true };
+  } catch (err) {
+    await query("ROLLBACK");
+    throw err;
+  }
+}
+
 /**
  * Process TEMPORARY_RESIDENCE approval
  */
 async function processTemporaryResidenceApproval(
   requestId: number,
   payload: any,
-  reviewerId: number
+  reviewerId: number,
+  targetHouseholdId?: number,
+  targetPersonId?: number
 ) {
   // Start transaction
   await query("BEGIN");
 
   try {
-    const residenceData = payload.residence || payload;
-    const { nhanKhauId, tuNgay, denNgay, diaChi, lyDo } = residenceData;
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+
+    const reqMeta = await query(
+      `SELECT "requesterUserId", "targetHouseholdId" FROM requests WHERE id = $1`,
+      [requestId]
+    );
+
+    const requesterUserId: number | null =
+      (reqMeta?.rowCount ?? 0) > 0
+        ? (reqMeta.rows[0].requesterUserId ?? null)
+        : null;
+
+    const effectiveHouseholdId: number | null = targetHouseholdId
+      ? Number(targetHouseholdId)
+      : (reqMeta?.rowCount ?? 0) > 0 && reqMeta.rows[0].targetHouseholdId
+        ? Number(reqMeta.rows[0].targetHouseholdId)
+        : null;
+
+    const residenceData = payload?.residence && typeof payload.residence === "object" ? payload.residence : payload;
+    const personPayload = payload?.person || payload?.nhanKhau || residenceData?.person || null;
+    const tuNgay = residenceData?.tuNgay;
+    const denNgay = residenceData?.denNgay;
+    const lyDo = residenceData?.lyDo || residenceData?.reason;
+    let diaChi = residenceData?.diaChi || payload?.diaChi || null;
+
+    let nhanKhauId: number | null = null;
+    if (targetPersonId) nhanKhauId = Number(targetPersonId);
+    if (!nhanKhauId && residenceData?.nhanKhauId) nhanKhauId = Number(residenceData.nhanKhauId);
+    if (!nhanKhauId && payload?.nhanKhauId) nhanKhauId = Number(payload.nhanKhauId);
+
+    if (!tuNgay || !lyDo) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Payload thiếu trường bắt buộc: tuNgay, lyDo",
+      };
+    }
+
+    if (!nhanKhauId && !personPayload) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Payload thiếu nhanKhauId hoặc thông tin person",
+      };
+    }
+
+    // Ensure we have a household context.
+    if (!effectiveHouseholdId) {
+      throw {
+        code: "HOUSEHOLD_REQUIRED",
+        message: "Không xác định được hộ khẩu liên quan của yêu cầu tạm trú",
+      };
+    }
+
+    // If diaChi (soHoKhau) missing, derive from household.
+    if (!diaChi || String(diaChi).trim() === "") {
+      const household = await query(
+        `SELECT "soHoKhau" FROM ho_khau WHERE id = $1`,
+        [effectiveHouseholdId]
+      );
+      const soHoKhau = household?.rows?.[0]?.soHoKhau;
+      if (!soHoKhau) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: "Không lấy được số hộ khẩu của hộ liên quan",
+        };
+      }
+      diaChi = soHoKhau;
+    }
+
+    // Support new person creation on approval (citizen submits payload.person).
+    if (!nhanKhauId && personPayload) {
+      const hoTen = String(personPayload?.hoTen || "").trim();
+      const cccd = personPayload?.cccd ? String(personPayload.cccd).trim() : "";
+      const ngaySinh = personPayload?.ngaySinh || null;
+      const gioiTinh = personPayload?.gioiTinh || null;
+      const noiSinh = String(personPayload?.noiSinh || "").trim();
+      const quanHe = personPayload?.quanHe || "khac";
+
+      if (!hoTen || !ngaySinh || !gioiTinh || !noiSinh || !quanHe) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message:
+            "Thiếu thông tin nhân khẩu bắt buộc: hoTen, ngaySinh, gioiTinh, noiSinh, quanHe",
+        };
+      }
+
+      // If CCCD provided and exists, reuse only if same household
+      if (cccd) {
+        const existing = await query(
+          `SELECT id, "hoKhauId" FROM nhan_khau WHERE cccd = $1 LIMIT 1`,
+          [cccd]
+        );
+        if ((existing?.rowCount ?? 0) > 0) {
+          const existingRow = existing.rows[0];
+          if (Number(existingRow.hoKhauId) !== Number(effectiveHouseholdId)) {
+            throw {
+              code: "VALIDATION_ERROR",
+              message: "Nhân khẩu với CCCD này đã tồn tại ở hộ khẩu khác",
+            };
+          }
+          nhanKhauId = Number(existingRow.id);
+        }
+      }
+
+      if (!nhanKhauId) {
+        const insertPerson = await query(
+          `INSERT INTO nhan_khau (
+            "hoTen", cccd, "ngaySinh", "gioiTinh", "noiSinh",
+            "nguyenQuan", "danToc", "tonGiao", "quocTich",
+            "ngayDangKyThuongTru", "diaChiThuongTruTruoc",
+            "ngheNghiep", "noiLamViec", "ghiChu",
+            "hoKhauId", "quanHe", "trangThai"
+          ) VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8, $9,
+            $10, $11,
+            $12, $13, $14,
+            $15, $16, $17
+          ) RETURNING id`,
+          [
+            hoTen,
+            cccd ? cccd : null,
+            ngaySinh,
+            gioiTinh,
+            noiSinh,
+            personPayload?.nguyenQuan || null,
+            personPayload?.danToc || null,
+            personPayload?.tonGiao || null,
+            personPayload?.quocTich || "Việt Nam",
+            personPayload?.ngayDangKyThuongTru || null,
+            personPayload?.diaChiThuongTruTruoc || null,
+            personPayload?.ngheNghiep || null,
+            personPayload?.noiLamViec || null,
+            personPayload?.ghiChu ? String(personPayload.ghiChu).trim() : null,
+            effectiveHouseholdId,
+            quanHe,
+            "active",
+          ]
+        );
+        nhanKhauId = Number(insertPerson.rows[0].id);
+      }
+    }
+
+    if (!nhanKhauId) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Không xác định được nhân khẩu để duyệt tạm trú",
+      };
+    }
 
     // 1. Check nhan_khau exists
     const nhanKhauCheck = await query(
@@ -2201,9 +3186,9 @@ async function processTemporaryResidenceApproval(
         nhanKhauId,
         tuNgay,
         denNgay || null,
-        diaChi.trim(),
-        lyDo.trim(),
-        reviewerId, // nguoiDangKy - actually the reviewer who approved the request
+        String(diaChi).trim(),
+        String(lyDo).trim(),
+        requesterUserId || reviewerId,
         reviewerId, // nguoiDuyet
       ]
     );
@@ -2214,6 +3199,8 @@ async function processTemporaryResidenceApproval(
     ]);
 
     await query("COMMIT");
+
+    return { id: nhanKhauId, tamTruVangId: insertResult.rows[0]?.id };
   } catch (err) {
     await query("ROLLBACK");
     throw err;
@@ -2226,14 +3213,136 @@ async function processTemporaryResidenceApproval(
 async function processTemporaryAbsenceApproval(
   requestId: number,
   payload: any,
-  reviewerId: number
+  reviewerId: number,
+  targetHouseholdId?: number,
+  targetPersonId?: number
 ) {
   // Start transaction
   await query("BEGIN");
 
   try {
-    const absenceData = payload.absence || payload;
-    const { nhanKhauId, tuNgay, denNgay, lyDo } = absenceData;
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+
+    const reqMeta = await query(
+      `SELECT "requesterUserId", "targetHouseholdId" FROM requests WHERE id = $1`,
+      [requestId]
+    );
+
+    const requesterUserId: number | null =
+      (reqMeta?.rowCount ?? 0) > 0
+        ? (reqMeta.rows[0].requesterUserId ?? null)
+        : null;
+
+    const effectiveHouseholdId: number | null = targetHouseholdId
+      ? Number(targetHouseholdId)
+      : (reqMeta?.rowCount ?? 0) > 0 && reqMeta.rows[0].targetHouseholdId
+        ? Number(reqMeta.rows[0].targetHouseholdId)
+        : null;
+
+    const absenceData = payload?.absence && typeof payload.absence === "object" ? payload.absence : payload;
+    const personPayload = payload?.person || payload?.nhanKhau || absenceData?.person || null;
+    const tuNgay = absenceData?.tuNgay;
+    const denNgay = absenceData?.denNgay;
+    const lyDo = absenceData?.lyDo || absenceData?.reason;
+
+    let nhanKhauId: number | null = null;
+    if (targetPersonId) nhanKhauId = Number(targetPersonId);
+    if (!nhanKhauId && absenceData?.nhanKhauId) nhanKhauId = Number(absenceData.nhanKhauId);
+    if (!nhanKhauId && payload?.nhanKhauId) nhanKhauId = Number(payload.nhanKhauId);
+
+    if (!tuNgay || !lyDo) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Payload thiếu trường bắt buộc: tuNgay, lyDo",
+      };
+    }
+
+    // Optional: allow creating a person on approve if payload.person provided.
+    if (!nhanKhauId && personPayload) {
+      if (!effectiveHouseholdId) {
+        throw {
+          code: "HOUSEHOLD_REQUIRED",
+          message: "Không xác định được hộ khẩu liên quan của yêu cầu tạm vắng",
+        };
+      }
+
+      const hoTen = String(personPayload?.hoTen || "").trim();
+      const cccd = personPayload?.cccd ? String(personPayload.cccd).trim() : "";
+      const ngaySinh = personPayload?.ngaySinh || null;
+      const gioiTinh = personPayload?.gioiTinh || null;
+      const noiSinh = String(personPayload?.noiSinh || "").trim();
+      const quanHe = personPayload?.quanHe || "khac";
+
+      if (!hoTen || !ngaySinh || !gioiTinh || !noiSinh || !quanHe) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message:
+            "Thiếu thông tin nhân khẩu bắt buộc: hoTen, ngaySinh, gioiTinh, noiSinh, quanHe",
+        };
+      }
+
+      if (cccd) {
+        const existing = await query(
+          `SELECT id, "hoKhauId" FROM nhan_khau WHERE cccd = $1 LIMIT 1`,
+          [cccd]
+        );
+        if ((existing?.rowCount ?? 0) > 0) {
+          const existingRow = existing.rows[0];
+          if (Number(existingRow.hoKhauId) !== Number(effectiveHouseholdId)) {
+            throw {
+              code: "VALIDATION_ERROR",
+              message: "Nhân khẩu với CCCD này đã tồn tại ở hộ khẩu khác",
+            };
+          }
+          nhanKhauId = Number(existingRow.id);
+        }
+      }
+
+      if (!nhanKhauId) {
+        const insertPerson = await query(
+          `INSERT INTO nhan_khau (
+            "hoTen", cccd, "ngaySinh", "gioiTinh", "noiSinh",
+            "nguyenQuan", "danToc", "tonGiao", "quocTich",
+            "ngayDangKyThuongTru", "diaChiThuongTruTruoc",
+            "ngheNghiep", "noiLamViec", "ghiChu",
+            "hoKhauId", "quanHe", "trangThai"
+          ) VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8, $9,
+            $10, $11,
+            $12, $13, $14,
+            $15, $16, $17
+          ) RETURNING id`,
+          [
+            hoTen,
+            cccd ? cccd : null,
+            ngaySinh,
+            gioiTinh,
+            noiSinh,
+            personPayload?.nguyenQuan || null,
+            personPayload?.danToc || null,
+            personPayload?.tonGiao || null,
+            personPayload?.quocTich || "Việt Nam",
+            personPayload?.ngayDangKyThuongTru || null,
+            personPayload?.diaChiThuongTruTruoc || null,
+            personPayload?.ngheNghiep || null,
+            personPayload?.noiLamViec || null,
+            personPayload?.ghiChu ? String(personPayload.ghiChu).trim() : null,
+            effectiveHouseholdId,
+            quanHe,
+            "active",
+          ]
+        );
+        nhanKhauId = Number(insertPerson.rows[0].id);
+      }
+    }
+
+    if (!nhanKhauId) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Thiếu nhân khẩu cần tạm vắng",
+      };
+    }
 
     // 1. Check nhan_khau exists
     const nhanKhauCheck = await query(
@@ -2285,7 +3394,7 @@ async function processTemporaryAbsenceApproval(
         tuNgay,
         denNgay || null,
         lyDo.trim(),
-        reviewerId, // nguoiDangKy - actually the reviewer who approved the request
+        requesterUserId || reviewerId,
         reviewerId, // nguoiDuyet
       ]
     );
@@ -2296,6 +3405,8 @@ async function processTemporaryAbsenceApproval(
     ]);
 
     await query("COMMIT");
+
+    return { id: nhanKhauId, tamTruVangId: insertResult.rows[0]?.id };
   } catch (err) {
     await query("ROLLBACK");
     throw err;
@@ -2429,13 +3540,40 @@ async function processSplitHouseholdApproval(
     const chuHoMoved = oldChuHoId && selectedIds.includes(Number(oldChuHoId));
 
     if (chuHoMoved) {
+      // If there are remaining members, require explicit replacement head in payload
       const remaining = await query(
-        `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 ORDER BY id LIMIT 1`,
+        `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 ORDER BY id`,
         [originalHouseholdId]
       );
 
       if ((remaining?.rowCount ?? 0) > 0) {
-        const newHeadId = remaining.rows[0].id;
+        const replacementFromPayloadRaw =
+          payload?.oldHouseholdNewChuHoId ?? payload?.oldChuHoIdReplacement;
+        const replacementFromPayload = replacementFromPayloadRaw
+          ? Number(replacementFromPayloadRaw)
+          : null;
+
+        if (!replacementFromPayload) {
+          throw {
+            code: "VALIDATION_ERROR",
+            message:
+              "Khi tách chủ hộ ra khỏi hộ khẩu gốc, vui lòng chọn chủ hộ thay thế cho hộ khẩu gốc",
+          };
+        }
+
+        const newHeadId = replacementFromPayload;
+
+        const isValidRemaining = remaining.rows.some(
+          (r: any) => Number(r.id) === Number(newHeadId)
+        );
+        if (!isValidRemaining) {
+          throw {
+            code: "VALIDATION_ERROR",
+            message:
+              "Vui lòng chọn chủ hộ thay thế hợp lệ cho hộ khẩu gốc khi tách chủ hộ",
+          };
+        }
+
         await query(`UPDATE nhan_khau SET "quanHe" = 'chu_ho' WHERE id = $1`, [
           newHeadId,
         ]);
@@ -2522,12 +3660,22 @@ async function processDeceasedApproval(
     }
 
     const person = await query(
-      `SELECT id, "trangThai" FROM nhan_khau WHERE id = $1`,
+      `SELECT id, "trangThai", "hoKhauId" FROM nhan_khau WHERE id = $1`,
       [nhanKhauId]
     );
 
     if ((person?.rowCount ?? 0) === 0) {
       throw { code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
+    }
+
+    if (
+      targetHouseholdId &&
+      Number(person.rows[0].hoKhauId) !== Number(targetHouseholdId)
+    ) {
+      throw {
+        code: "PERSON_OUTSIDE_HOUSEHOLD",
+        message: "Nhân khẩu không thuộc hộ khẩu liên quan của yêu cầu",
+      };
     }
 
     if (String(person.rows[0].trangThai) === "khai_tu") {
@@ -2539,10 +3687,22 @@ async function processDeceasedApproval(
     );
     const lyDo = (payload?.lyDo || payload?.reason || "Khai tử").toString();
     const noiMat = payload?.noiMat || payload?.diaDiem || null;
+    const ghiChu =
+      payload?.ghiChu ||
+      payload?.note ||
+      (noiMat ? `Nơi mất: ${String(noiMat)}` : null);
 
+    // Keep person record but mark movement status; overwrite note for clarity in UI
     await query(
-      `UPDATE nhan_khau SET "trangThai" = 'khai_tu', "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1`,
-      [nhanKhauId]
+      `UPDATE nhan_khau
+       SET "trangThai" = 'khai_tu',
+           "ghiChu" = CASE
+             WHEN $2::text IS NULL OR trim($2::text) = '' THEN "ghiChu"
+             ELSE $2
+           END,
+           "updatedAt" = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [nhanKhauId, `Khai tử (${ngayMat}): ${lyDo}${noiMat ? ` - ${String(noiMat)}` : ""}`]
     );
 
     await query(
@@ -2553,11 +3713,101 @@ async function processDeceasedApproval(
         $1, 'khai_tu', $2, $3, NULL, NULL,
         $4, $4, 'da_duyet', $5
       )`,
-      [nhanKhauId, ngayMat, lyDo, reviewerId, noiMat || null]
+      [nhanKhauId, ngayMat, lyDo, reviewerId, ghiChu || null]
     );
 
     await query("COMMIT");
     return { personId: nhanKhauId, ngayMat, lyDo, noiMat };
+  } catch (err) {
+    await query("ROLLBACK");
+    throw err;
+  }
+}
+
+async function processMoveOutApproval(
+  requestId: number,
+  payload: any,
+  reviewerId: number,
+  targetHouseholdId?: number,
+  targetPersonId?: number
+) {
+  await query("BEGIN");
+
+  try {
+    const nhanKhauId =
+      targetPersonId || payload?.nhanKhauId || payload?.personId;
+    if (!nhanKhauId) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Thiếu nhân khẩu cần chuyển đi",
+      };
+    }
+
+    const person = await query(
+      `SELECT id, "trangThai", "hoKhauId" FROM nhan_khau WHERE id = $1`,
+      [nhanKhauId]
+    );
+
+    if ((person?.rowCount ?? 0) === 0) {
+      throw { code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
+    }
+
+    if (
+      targetHouseholdId &&
+      Number(person.rows[0].hoKhauId) !== Number(targetHouseholdId)
+    ) {
+      throw {
+        code: "PERSON_OUTSIDE_HOUSEHOLD",
+        message: "Nhân khẩu không thuộc hộ khẩu liên quan của yêu cầu",
+      };
+    }
+
+    if (String(person.rows[0].trangThai) === "chuyen_di") {
+      throw { code: "ALREADY_MOVED_OUT", message: "Nhân khẩu đã chuyển đi" };
+    }
+
+    if (String(person.rows[0].trangThai) === "khai_tu") {
+      throw {
+        code: "PERSON_DECEASED",
+        message: "Nhân khẩu đã khai tử, không thể ghi nhận chuyển đi",
+      };
+    }
+
+    const ngayChuyen = normalizeDateOnly(
+      payload?.ngayChuyen || payload?.ngayDi || payload?.ngayThucHien || getCurrentDateString()
+    );
+    const lyDo = (payload?.lyDo || payload?.reason || payload?.noiDung || "Chuyển đi").toString();
+    const noiDen = payload?.noiDen || payload?.diaChiMoi || payload?.diaChiDen || null;
+    const ghiChu = payload?.ghiChu || payload?.note || null;
+
+    await query(
+      `UPDATE nhan_khau
+       SET "trangThai" = 'chuyen_di',
+           "ghiChu" = CASE
+             WHEN $2::text IS NULL OR trim($2::text) = '' THEN "ghiChu"
+             ELSE $2
+           END,
+           "updatedAt" = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [
+        nhanKhauId,
+        `Chuyển đi (${ngayChuyen}): ${lyDo}${noiDen ? ` - ${String(noiDen)}` : ""}`,
+      ]
+    );
+
+    await query(
+      `INSERT INTO bien_dong (
+        "nhanKhauId", loai, "ngayThucHien", "noiDung", "diaChiCu", "diaChiMoi",
+        "nguoiThucHien", "canBoXacNhan", "trangThai", "ghiChu"
+      ) VALUES (
+        $1, 'chuyen_di', $2, $3, NULL, $4,
+        $5, $5, 'da_duyet', $6
+      )`,
+      [nhanKhauId, ngayChuyen, lyDo, noiDen, reviewerId, ghiChu]
+    );
+
+    await query("COMMIT");
+    return { personId: nhanKhauId, ngayChuyen, lyDo, noiDen };
   } catch (err) {
     await query("ROLLBACK");
     throw err;

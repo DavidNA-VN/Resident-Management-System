@@ -23,13 +23,18 @@ export default function RequestModal({
     useEffect(() => {
         if (isOpen && type) {
             if (type === "TAM_TRU") {
-                setFormData({ lyDo: "Tạm trú", ghiChu: "Tạm trú" });
+                setFormData({
+                    lyDo: "Tạm trú",
+                    ghiChu: "Tạm trú",
+                    // Keep legacy diaChi but now it carries soHoKhau
+                    diaChi: householdInfo?.soHoKhau || "",
+                });
             } else {
                 setFormData({});
             }
             setError(null);
         }
-    }, [isOpen, type]);
+    }, [isOpen, type, householdInfo?.soHoKhau]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -69,11 +74,14 @@ export default function RequestModal({
                 "noiSinh",
                 "quanHe",
                 "tuNgay",
-                "diaChi",
             ];
             const missing = requiredFields.filter((f) => !formData[f]);
             if (missing.length > 0) {
                 setError(`Vui lòng nhập: ${missing.join(", ")}`);
+                return;
+            }
+            if (!householdInfo?.soHoKhau || String(householdInfo.soHoKhau).trim() === "") {
+                setError("Không lấy được số hộ khẩu của hộ hiện tại");
                 return;
             }
             if (!formData.lyDo || formData.lyDo.trim() === "") {
@@ -99,7 +107,8 @@ export default function RequestModal({
                     },
                     tuNgay: formData.tuNgay,
                     denNgay: formData.denNgay,
-                    diaChi: formData.diaChi,
+                    // diaChi carries the fixed soHoKhau
+                    diaChi: householdInfo?.soHoKhau || formData.diaChi,
                     lyDo: formData.lyDo || "Tạm trú",
                     ghiChu: formData.ghiChu || "Tạm trú",
                 };

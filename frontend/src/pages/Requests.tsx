@@ -13,6 +13,35 @@ interface RequestItem {
   payload?: any;
 }
 
+const requestTypeLabels: Record<string, string> = {
+  TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
+  SPLIT_HOUSEHOLD: "Yêu cầu tách hộ khẩu",
+  ADD_PERSON: "Thêm nhân khẩu",
+  ADD_NEWBORN: "Thêm con sơ sinh",
+  TEMPORARY_RESIDENCE: "Xin tạm trú",
+  TEMPORARY_ABSENCE: "Xin tạm vắng",
+  SUA_NHAN_KHAU: "Sửa thông tin nhân khẩu",
+  XOA_NHAN_KHAU: "Xoá nhân khẩu",
+  UPDATE_PERSON: "Sửa thông tin nhân khẩu",
+  REMOVE_PERSON: "Xoá nhân khẩu",
+  TAM_TRU: "Xin tạm trú",
+  TAM_VANG: "Xin tạm vắng",
+  DECEASED: "Xác nhận qua đời",
+  MOVE_OUT: "Xác nhận chuyển đi",
+};
+
+const statusLabels: Record<string, string> = {
+  PENDING: "Chờ duyệt",
+  APPROVED: "Đã duyệt",
+  REJECTED: "Từ chối",
+  pending: "Chờ duyệt",
+  approved: "Đã duyệt",
+  rejected: "Từ chối",
+  processing: "Đang xử lý",
+};
+
+const normalizeKey = (v: any) => String(v || "").trim();
+
 export default function Requests() {
   const [requests, setRequests] = useState<RequestItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -59,12 +88,15 @@ export default function Requests() {
             <div key={r.id} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm flex items-center justify-between">
               <div>
                 <div className="font-semibold text-gray-900">
-                  {r.type} {r.nhanKhauLienQuan ? `- ${r.nhanKhauLienQuan.hoTen}` : ""}
+                  {(requestTypeLabels[normalizeKey(r.type)] || r.type) +
+                    (r.nhanKhauLienQuan ? ` - ${r.nhanKhauLienQuan.hoTen}` : "")}
                 </div>
                 <div className="text-sm text-gray-500">
                   {r.hoKhauLienQuan ? `${r.hoKhauLienQuan.soHoKhau} - ${r.hoKhauLienQuan.diaChi}` : ""}
                 </div>
-                <div className="text-xs text-gray-400 mt-1">Gửi: {new Date(r.createdAt).toLocaleString()}</div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Gửi: {new Date(r.createdAt).toLocaleString("vi-VN")} • Trạng thái: {statusLabels[normalizeKey(r.status)] || r.status}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
