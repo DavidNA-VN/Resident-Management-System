@@ -206,12 +206,54 @@ class ApiService {
     const qs = new URLSearchParams();
     (params.genders || []).forEach((g) => qs.append("genders", g));
     (params.ageGroups || []).forEach((a) => qs.append("ageGroups", a));
-    (params.residenceTypes || []).forEach((r) => qs.append("residenceTypes", r));
+    (params.residenceTypes || []).forEach((r) =>
+      qs.append("residenceTypes", r)
+    );
     if (params.startDate) qs.set("startDate", params.startDate);
     if (params.endDate) qs.set("endDate", params.endDate);
 
     const query = qs.toString();
-    return this.request(`/thongke${query ? `?${query}` : ""}`, { method: "GET" });
+    return this.request(`/thongke${query ? `?${query}` : ""}`, {
+      method: "GET",
+    });
+  }
+
+  async getDashboard(): Promise<{
+    success: boolean;
+    stats: {
+      hoKhau: number;
+      nhanKhau: number;
+      bienDong: number;
+      phanAnhPending: number;
+    };
+    changes: {
+      hoKhau: number;
+      nhanKhau: number;
+      bienDong: number;
+      phanAnhPending: number;
+    };
+    quickStats: {
+      tamTru: number;
+      tamVang: number;
+      choDuyet: number;
+      daXuLy: number;
+    };
+    recentActivities: Array<{
+      id: number;
+      type: string;
+      description: string;
+      user: string;
+      createdAt: string;
+    }>;
+    notifications: Array<{
+      id: number;
+      type: string;
+      title: string;
+      createdAt: string;
+    }>;
+    error?: any;
+  }> {
+    return this.request("/dashboard", { method: "GET" });
   }
 
   async getCitizenHouseholds() {
@@ -565,7 +607,8 @@ class ApiService {
     if (params.category) query.append("category", params.category);
     if (params.userId) query.append("userId", String(params.userId));
     if (params.keyword) query.append("keyword", params.keyword);
-    if (params.reporterKeyword) query.append("reporterKeyword", params.reporterKeyword);
+    if (params.reporterKeyword)
+      query.append("reporterKeyword", params.reporterKeyword);
     if (params.includeMerged) query.append("includeMerged", "1");
 
     return this.request<{
@@ -573,11 +616,32 @@ class ApiService {
       data: any[];
       total: number;
       page: number;
-      limit: number
-    }>(
-      `/feedbacks?${query.toString()}`,
-      { method: "GET" }
-    );
+      limit: number;
+    }>(`/feedbacks?${query.toString()}`, { method: "GET" });
+  }
+
+  async getFeedbackStats(
+    params: {
+      fromDate?: string;
+      toDate?: string;
+      includeMerged?: boolean;
+    } = {}
+  ) {
+    const query = new URLSearchParams();
+    if (params.fromDate) query.append("fromDate", params.fromDate);
+    if (params.toDate) query.append("toDate", params.toDate);
+    if (params.includeMerged) query.append("includeMerged", "1");
+
+    const qs = query.toString();
+    return this.request<{
+      success: boolean;
+      data: {
+        fromDate: string | null;
+        toDate: string | null;
+        total: number;
+        byStatus: Array<{ status: string; count: number }>;
+      };
+    }>(`/feedbacks/stats${qs ? `?${qs}` : ""}`, { method: "GET" });
   }
 
   // Gửi phản hồi cho phản ánh
@@ -596,13 +660,10 @@ class ApiService {
 
   // Gộp các phản ánh
   async merge(ids: number[]) {
-    return this.request<{ success: boolean; data: any }>(
-      "/feedbacks/merge",
-      {
-        method: "POST",
-        body: JSON.stringify({ ids }),
-      }
-    );
+    return this.request<{ success: boolean; data: any }>("/feedbacks/merge", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
   }
 
   // TODO: Thay bằng API thật khi backend có endpoint /citizen/my-household

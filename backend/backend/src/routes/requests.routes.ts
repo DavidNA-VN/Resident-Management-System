@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { query, pool } from "../db";
-import { requireAnyTask, requireAuth, requireRole } from "../middlewares/auth.middleware";
+import {
+  requireAnyTask,
+  requireAuth,
+  requireRole,
+} from "../middlewares/auth.middleware";
 import { getCurrentDateString, normalizeDateOnly } from "../utils/date";
 
 const router = Router();
@@ -45,7 +49,9 @@ async function buildPrecheckWarnings(opts: {
 
   const payload = opts.payload || {};
   const cccds = extractCccdCandidates(opts.type, payload);
-  const targetPersonId = opts.targetPersonId ? Number(opts.targetPersonId) : null;
+  const targetPersonId = opts.targetPersonId
+    ? Number(opts.targetPersonId)
+    : null;
   const targetHouseholdId = opts.targetHouseholdId
     ? Number(opts.targetHouseholdId)
     : null;
@@ -65,7 +71,7 @@ async function buildPrecheckWarnings(opts: {
       if (conflicts.length > 0) {
         warnings.push({
           code: "DUPLICATE_CCCD",
-          message: `CCCD ${cccd} đã tồn tại trong hệ thống (${conflicts.length} bản ghi)` ,
+          message: `CCCD ${cccd} đã tồn tại trong hệ thống (${conflicts.length} bản ghi)`,
           details: conflicts.map((r: any) => ({
             id: Number(r.id),
             hoKhauId: r.hoKhauId ? Number(r.hoKhauId) : null,
@@ -77,8 +83,9 @@ async function buildPrecheckWarnings(opts: {
   }
 
   // 2) Second head of household (when creating/adding a person with quanHe=chu_ho)
-  const quanHe =
-    String(payload?.person?.quanHe || payload?.nhanKhau?.quanHe || "").toLowerCase();
+  const quanHe = String(
+    payload?.person?.quanHe || payload?.nhanKhau?.quanHe || ""
+  ).toLowerCase();
   if (quanHe === "chu_ho" && targetHouseholdId) {
     const hasChuHo = await query(
       `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 AND LOWER("quanHe") = 'chu_ho' LIMIT 1`,
@@ -87,8 +94,7 @@ async function buildPrecheckWarnings(opts: {
     if ((hasChuHo?.rowCount ?? 0) > 0) {
       warnings.push({
         code: "DUPLICATE_HEAD",
-        message:
-          "Hộ khẩu đã có Chủ hộ, không thể thêm một Chủ hộ thứ hai",
+        message: "Hộ khẩu đã có Chủ hộ, không thể thêm một Chủ hộ thứ hai",
         details: { existingChuHoId: Number(hasChuHo.rows[0].id) },
       });
     }
@@ -1012,11 +1018,14 @@ router.post(
           if (!nhanKhauId) {
             const normalizedCccd = cccd ? String(cccd).trim() : "";
             const processedLyDoKhongCoCCCD = !normalizedCccd
-              ? String(lyDoKhongCoCCCD || personPayload?.ghiChu || "").trim() || null
+              ? String(lyDoKhongCoCCCD || personPayload?.ghiChu || "").trim() ||
+                null
               : null;
             const processedGhiChu =
               normalizedCccd || lyDoKhongCoCCCD
-                ? (personPayload?.ghiChu ? String(personPayload.ghiChu).trim() : null)
+                ? personPayload?.ghiChu
+                  ? String(personPayload.ghiChu).trim()
+                  : null
                 : null;
 
             const insertPerson = await query(
@@ -1249,7 +1258,9 @@ router.get(
       let parsedPayload: any = null;
       try {
         parsedPayload =
-          typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+          typeof row.payload === "string"
+            ? JSON.parse(row.payload)
+            : row.payload;
 
         // requests.payload has { attachments: [...] }, while tam_tru_vang.attachments is already an array
         if (Array.isArray(parsedPayload)) attachments = parsedPayload;
@@ -1469,15 +1480,23 @@ function validateTemporaryResidencePayload(payload: any): string | null {
 
   const personPayload =
     (payload?.person && typeof payload.person === "object" && payload.person) ||
-    (payload?.nhanKhau && typeof payload.nhanKhau === "object" && payload.nhanKhau) ||
-    (residenceData?.person && typeof residenceData.person === "object" &&
+    (payload?.nhanKhau &&
+      typeof payload.nhanKhau === "object" &&
+      payload.nhanKhau) ||
+    (residenceData?.person &&
+      typeof residenceData.person === "object" &&
       residenceData.person) ||
     null;
 
   const nhanKhauIdRaw =
-    residenceData?.nhanKhauId ?? payload?.nhanKhauId ?? payload?.personId ?? null;
+    residenceData?.nhanKhauId ??
+    payload?.nhanKhauId ??
+    payload?.personId ??
+    null;
   const nhanKhauIdNum =
-    nhanKhauIdRaw !== null && nhanKhauIdRaw !== undefined && nhanKhauIdRaw !== ""
+    nhanKhauIdRaw !== null &&
+    nhanKhauIdRaw !== undefined &&
+    nhanKhauIdRaw !== ""
       ? Number(nhanKhauIdRaw)
       : null;
 
@@ -1533,14 +1552,20 @@ function validateTemporaryAbsencePayload(payload: any): string | null {
 
   const personPayload =
     (payload?.person && typeof payload.person === "object" && payload.person) ||
-    (payload?.nhanKhau && typeof payload.nhanKhau === "object" && payload.nhanKhau) ||
-    (absenceData?.person && typeof absenceData.person === "object" && absenceData.person) ||
+    (payload?.nhanKhau &&
+      typeof payload.nhanKhau === "object" &&
+      payload.nhanKhau) ||
+    (absenceData?.person &&
+      typeof absenceData.person === "object" &&
+      absenceData.person) ||
     null;
 
   const nhanKhauIdRaw =
     absenceData?.nhanKhauId ?? payload?.nhanKhauId ?? payload?.personId ?? null;
   const nhanKhauIdNum =
-    nhanKhauIdRaw !== null && nhanKhauIdRaw !== undefined && nhanKhauIdRaw !== ""
+    nhanKhauIdRaw !== null &&
+    nhanKhauIdRaw !== undefined &&
+    nhanKhauIdRaw !== ""
       ? Number(nhanKhauIdRaw)
       : null;
 
@@ -1667,8 +1692,10 @@ function validateUpdatePersonPayload(payload: any): string | null {
   // Here we only validate internal consistency.
   const hasAnyCccdField =
     (typeof payload.cccd === "string" && payload.cccd.trim() !== "") ||
-    (typeof payload.ngayCapCCCD === "string" && payload.ngayCapCCCD.trim() !== "") ||
-    (typeof payload.noiCapCCCD === "string" && payload.noiCapCCCD.trim() !== "");
+    (typeof payload.ngayCapCCCD === "string" &&
+      payload.ngayCapCCCD.trim() !== "") ||
+    (typeof payload.noiCapCCCD === "string" &&
+      payload.noiCapCCCD.trim() !== "");
   if (hasAnyCccdField) {
     const cccd = String(payload.cccd || "").trim();
     if (!cccd) {
@@ -1761,7 +1788,8 @@ function validateMoveOutPayload(payload: any): string | null {
     return "Vui lòng chọn nhân khẩu cần chuyển đi";
   }
 
-  const ngayChuyen = payload.ngayChuyen || payload.ngayDi || payload.ngayThucHien;
+  const ngayChuyen =
+    payload.ngayChuyen || payload.ngayDi || payload.ngayThucHien;
   if (!ngayChuyen) {
     return "Vui lòng nhập ngày chuyển đi";
   }
@@ -2156,10 +2184,9 @@ router.post(
         // Postgres unique violation
         if (e && e.code === "23505") {
           const constraint = String(e.constraint || "");
-          const msg =
-            constraint.toLowerCase().includes("cccd")
-              ? "CCCD đã tồn tại trong hệ thống"
-              : "Dữ liệu bị trùng lặp (unique constraint)";
+          const msg = constraint.toLowerCase().includes("cccd")
+            ? "CCCD đã tồn tại trong hệ thống"
+            : "Dữ liệu bị trùng lặp (unique constraint)";
           return res.status(400).json({
             success: false,
             error: {
@@ -2452,9 +2479,7 @@ async function processAddNewbornApproval(
     // - Không nhồi trạng thái/ghi chú hệ thống vào nhan_khau.ghiChu (tránh lẫn với ghi chú hồ sơ)
     // - Nếu thiếu CCCD thì lưu lý do vào nhan_khau.lyDoKhongCoCCCD
     const processedLyDoKhongCoCCCD =
-      !cccd || String(cccd).trim() === ""
-        ? "Mới sinh - chưa có CCCD"
-        : null;
+      !cccd || String(cccd).trim() === "" ? "Mới sinh - chưa có CCCD" : null;
     const processedGhiChu = ghiChu ? String(ghiChu).trim() : null;
     const processedNgheNghiep = null;
     const processedNoiLamViec = null;
@@ -2646,7 +2671,9 @@ async function processAddPersonApproval(
     // Nếu thiếu CCCD và người dùng chưa có field riêng, coi ghiChu là lý do thiếu CCCD (để không làm bẩn ghiChu hồ sơ)
     const processedGhiChu =
       normalizedCccd || lyDoKhongCoCCCD
-        ? (ghiChu ? String(ghiChu).trim() : null)
+        ? ghiChu
+          ? String(ghiChu).trim()
+          : null
         : null;
     const processedNgayDangKyThuongTru =
       ngayDangKyThuongTru || getCurrentDateString();
@@ -2721,7 +2748,9 @@ async function processUpdatePersonApproval(
   await query("BEGIN");
 
   try {
-    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [
+      requestId,
+    ]);
 
     const nhanKhauId =
       targetPersonId || payload?.nhanKhauId || payload?.personId;
@@ -2753,7 +2782,8 @@ async function processUpdatePersonApproval(
       if (currentCccd !== "") {
         throw {
           code: "VALIDATION_ERROR",
-          message: "Nhân khẩu đã có CCCD/CMND nên không thể sửa CCCD qua yêu cầu này",
+          message:
+            "Nhân khẩu đã có CCCD/CMND nên không thể sửa CCCD qua yêu cầu này",
         };
       }
       if (!payloadCccd) {
@@ -2902,7 +2932,9 @@ async function processUpdatePersonApproval(
         getCurrentDateString(),
         lyDo,
         reviewerId,
-        JSON.stringify({ changedFields: setClauses.map((c) => c.split("=")[0].trim()) }),
+        JSON.stringify({
+          changedFields: setClauses.map((c) => c.split("=")[0].trim()),
+        }),
       ]
     );
 
@@ -2924,7 +2956,9 @@ async function processRemovePersonApproval(
   await query("BEGIN");
 
   try {
-    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [
+      requestId,
+    ]);
 
     const nhanKhauId =
       targetPersonId || payload?.nhanKhauId || payload?.personId;
@@ -2951,7 +2985,9 @@ async function processRemovePersonApproval(
       };
     }
 
-    const lyDo = String(payload?.lyDo || payload?.reason || "Xoá nhân khẩu").trim();
+    const lyDo = String(
+      payload?.lyDo || payload?.reason || "Xoá nhân khẩu"
+    ).trim();
     const noteLine = `Xoá nhân khẩu (${getCurrentDateString()}): ${lyDo}`;
 
     await query(
@@ -2988,7 +3024,9 @@ async function processTemporaryResidenceApproval(
   await query("BEGIN");
 
   try {
-    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [
+      requestId,
+    ]);
 
     const reqMeta = await query(
       `SELECT "requesterUserId", "targetHouseholdId" FROM requests WHERE id = $1`,
@@ -2997,17 +3035,21 @@ async function processTemporaryResidenceApproval(
 
     const requesterUserId: number | null =
       (reqMeta?.rowCount ?? 0) > 0
-        ? (reqMeta.rows[0].requesterUserId ?? null)
+        ? reqMeta.rows[0].requesterUserId ?? null
         : null;
 
     const effectiveHouseholdId: number | null = targetHouseholdId
       ? Number(targetHouseholdId)
       : (reqMeta?.rowCount ?? 0) > 0 && reqMeta.rows[0].targetHouseholdId
-        ? Number(reqMeta.rows[0].targetHouseholdId)
-        : null;
+      ? Number(reqMeta.rows[0].targetHouseholdId)
+      : null;
 
-    const residenceData = payload?.residence && typeof payload.residence === "object" ? payload.residence : payload;
-    const personPayload = payload?.person || payload?.nhanKhau || residenceData?.person || null;
+    const residenceData =
+      payload?.residence && typeof payload.residence === "object"
+        ? payload.residence
+        : payload;
+    const personPayload =
+      payload?.person || payload?.nhanKhau || residenceData?.person || null;
     const tuNgay = residenceData?.tuNgay;
     const denNgay = residenceData?.denNgay;
     const lyDo = residenceData?.lyDo || residenceData?.reason;
@@ -3015,8 +3057,10 @@ async function processTemporaryResidenceApproval(
 
     let nhanKhauId: number | null = null;
     if (targetPersonId) nhanKhauId = Number(targetPersonId);
-    if (!nhanKhauId && residenceData?.nhanKhauId) nhanKhauId = Number(residenceData.nhanKhauId);
-    if (!nhanKhauId && payload?.nhanKhauId) nhanKhauId = Number(payload.nhanKhauId);
+    if (!nhanKhauId && residenceData?.nhanKhauId)
+      nhanKhauId = Number(residenceData.nhanKhauId);
+    if (!nhanKhauId && payload?.nhanKhauId)
+      nhanKhauId = Number(payload.nhanKhauId);
 
     if (!tuNgay || !lyDo) {
       throw {
@@ -3221,7 +3265,9 @@ async function processTemporaryAbsenceApproval(
   await query("BEGIN");
 
   try {
-    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [requestId]);
+    await query(`SELECT id FROM requests WHERE id = $1 FOR UPDATE`, [
+      requestId,
+    ]);
 
     const reqMeta = await query(
       `SELECT "requesterUserId", "targetHouseholdId" FROM requests WHERE id = $1`,
@@ -3230,25 +3276,31 @@ async function processTemporaryAbsenceApproval(
 
     const requesterUserId: number | null =
       (reqMeta?.rowCount ?? 0) > 0
-        ? (reqMeta.rows[0].requesterUserId ?? null)
+        ? reqMeta.rows[0].requesterUserId ?? null
         : null;
 
     const effectiveHouseholdId: number | null = targetHouseholdId
       ? Number(targetHouseholdId)
       : (reqMeta?.rowCount ?? 0) > 0 && reqMeta.rows[0].targetHouseholdId
-        ? Number(reqMeta.rows[0].targetHouseholdId)
-        : null;
+      ? Number(reqMeta.rows[0].targetHouseholdId)
+      : null;
 
-    const absenceData = payload?.absence && typeof payload.absence === "object" ? payload.absence : payload;
-    const personPayload = payload?.person || payload?.nhanKhau || absenceData?.person || null;
+    const absenceData =
+      payload?.absence && typeof payload.absence === "object"
+        ? payload.absence
+        : payload;
+    const personPayload =
+      payload?.person || payload?.nhanKhau || absenceData?.person || null;
     const tuNgay = absenceData?.tuNgay;
     const denNgay = absenceData?.denNgay;
     const lyDo = absenceData?.lyDo || absenceData?.reason;
 
     let nhanKhauId: number | null = null;
     if (targetPersonId) nhanKhauId = Number(targetPersonId);
-    if (!nhanKhauId && absenceData?.nhanKhauId) nhanKhauId = Number(absenceData.nhanKhauId);
-    if (!nhanKhauId && payload?.nhanKhauId) nhanKhauId = Number(payload.nhanKhauId);
+    if (!nhanKhauId && absenceData?.nhanKhauId)
+      nhanKhauId = Number(absenceData.nhanKhauId);
+    if (!nhanKhauId && payload?.nhanKhauId)
+      nhanKhauId = Number(payload.nhanKhauId);
 
     if (!tuNgay || !lyDo) {
       throw {
@@ -3702,7 +3754,10 @@ async function processDeceasedApproval(
            END,
            "updatedAt" = CURRENT_TIMESTAMP
        WHERE id = $1`,
-      [nhanKhauId, `Khai tử (${ngayMat}): ${lyDo}${noiMat ? ` - ${String(noiMat)}` : ""}`]
+      [
+        nhanKhauId,
+        `Khai tử (${ngayMat}): ${lyDo}${noiMat ? ` - ${String(noiMat)}` : ""}`,
+      ]
     );
 
     await query(
@@ -3774,10 +3829,19 @@ async function processMoveOutApproval(
     }
 
     const ngayChuyen = normalizeDateOnly(
-      payload?.ngayChuyen || payload?.ngayDi || payload?.ngayThucHien || getCurrentDateString()
+      payload?.ngayChuyen ||
+        payload?.ngayDi ||
+        payload?.ngayThucHien ||
+        getCurrentDateString()
     );
-    const lyDo = (payload?.lyDo || payload?.reason || payload?.noiDung || "Chuyển đi").toString();
-    const noiDen = payload?.noiDen || payload?.diaChiMoi || payload?.diaChiDen || null;
+    const lyDo = (
+      payload?.lyDo ||
+      payload?.reason ||
+      payload?.noiDung ||
+      "Chuyển đi"
+    ).toString();
+    const noiDen =
+      payload?.noiDen || payload?.diaChiMoi || payload?.diaChiDen || null;
     const ghiChu = payload?.ghiChu || payload?.note || null;
 
     await query(
@@ -3791,7 +3855,9 @@ async function processMoveOutApproval(
        WHERE id = $1`,
       [
         nhanKhauId,
-        `Chuyển đi (${ngayChuyen}): ${lyDo}${noiDen ? ` - ${String(noiDen)}` : ""}`,
+        `Chuyển đi (${ngayChuyen}): ${lyDo}${
+          noiDen ? ` - ${String(noiDen)}` : ""
+        }`,
       ]
     );
 

@@ -270,6 +270,8 @@ export default function NhanKhau() {
       ngheNghiep: "Nghề nghiệp",
       noiLamViec: "Nơi làm việc",
       ghiChu: "Ghi chú",
+      ghiChuHoKhau: "Ghi chú hộ khẩu",
+      lyDoKhongCoCCCD: "Lý do không có CCCD",
       trangThai: "Trạng thái",
     }),
     []
@@ -301,6 +303,53 @@ export default function NhanKhau() {
 
   const formatHistoryValue = (value: any, field?: string) => {
     if (value === null || value === undefined || value === "") return "(trống)";
+
+    const tryParseJson = (v: any) => {
+      if (typeof v !== "string") return null;
+      const trimmed = v.trim();
+      if (!trimmed) return null;
+      if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return null;
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return null;
+      }
+    };
+
+    const parsed = tryParseJson(value);
+    if (parsed !== null) {
+      if (Array.isArray(parsed)) {
+        const items = parsed
+          .map((x) => {
+            if (x && typeof x === "object") {
+              const maybeName = (x as any).hoTen || (x as any).name;
+              const maybeId = (x as any).id;
+              if (maybeName && maybeId) return `${maybeName} (ID: ${maybeId})`;
+              if (maybeName) return String(maybeName);
+            }
+            return String(x);
+          })
+          .filter(Boolean);
+        return items.length ? items.join(", ") : "(trống)";
+      }
+
+      if (parsed && typeof parsed === "object") {
+        const obj: any = parsed;
+        if (obj.hoTen && obj.id) return `${obj.hoTen} (ID: ${obj.id})`;
+        if (obj.hoTen) return String(obj.hoTen);
+        const entries = Object.entries(obj)
+          .slice(0, 6)
+          .map(([k, v]) => {
+            const label = historyFieldLabels[k] || k;
+            const vv =
+              v === null || v === undefined || String(v).trim() === ""
+                ? "(trống)"
+                : String(v);
+            return `${label}: ${vv}`;
+          });
+        return entries.length ? entries.join("; ") : "(trống)";
+      }
+    }
 
     if (field === "quanHe") {
       return formatQuanHeValue(value);
@@ -424,7 +473,15 @@ export default function NhanKhau() {
     }, 300);
 
     return () => clearTimeout(id);
-  }, [globalQuery, selectedHoKhauId, filters.ageGroup, filters.gender, filters.residenceStatus, filters.movementStatus, filters.feedbackStatus]);
+  }, [
+    globalQuery,
+    selectedHoKhauId,
+    filters.ageGroup,
+    filters.gender,
+    filters.residenceStatus,
+    filters.movementStatus,
+    filters.feedbackStatus,
+  ]);
 
   // Close popover on click outside or ESC
   useEffect(() => {
@@ -680,7 +737,9 @@ export default function NhanKhau() {
       "diaChiThuongTruTruoc",
     ];
 
-    const missing = requiredFields.filter((key) => !normalizeField(formData[key]));
+    const missing = requiredFields.filter(
+      (key) => !normalizeField(formData[key])
+    );
     if (missing.length > 0) {
       const message =
         "Vui lòng nhập đầy đủ các trường bắt buộc (Hộ khẩu, Họ tên, CCCD/CMND, Ngày sinh, Giới tính, Quan hệ, Nơi sinh, Nguyên quán, Dân tộc, Tôn giáo, Quốc tịch, Nghề nghiệp, Nơi làm việc, Ngày đăng ký thường trú, Địa chỉ thường trú trước đây)";
@@ -724,10 +783,8 @@ export default function NhanKhau() {
         tonGiao: normalizeField(formData.tonGiao)!,
         quocTich: normalizeField(formData.quocTich)!,
         quanHe: formData.quanHe as any,
-        ngayDangKyThuongTru:
-          normalizeDateOnly(formData.ngayDangKyThuongTru)!,
-        diaChiThuongTruTruoc:
-          normalizeField(formData.diaChiThuongTruTruoc)!,
+        ngayDangKyThuongTru: normalizeDateOnly(formData.ngayDangKyThuongTru)!,
+        diaChiThuongTruTruoc: normalizeField(formData.diaChiThuongTruTruoc)!,
         ngheNghiep: normalizeField(formData.ngheNghiep)!,
         noiLamViec: normalizeField(formData.noiLamViec)!,
         ghiChu: normalizeField(formData.ghiChu) || undefined,
@@ -1528,6 +1585,8 @@ export default function NhanKhau() {
                           ? "Tạo mới"
                           : item.hanhDong === "update"
                           ? "Cập nhật"
+                          : item.hanhDong === "delete"
+                          ? "Xóa"
                           : item.hanhDong;
                       const fieldLabel = item.truong
                         ? historyFieldLabels[item.truong] || item.truong
@@ -1980,7 +2039,8 @@ export default function NhanKhau() {
                 </label>
 
                 <label className="block text-sm font-medium text-gray-700">
-                  Ngày đăng ký thường trú <span className="text-red-500">*</span>
+                  Ngày đăng ký thường trú{" "}
+                  <span className="text-red-500">*</span>
                   <input
                     type="date"
                     required
@@ -2134,7 +2194,8 @@ export default function NhanKhau() {
               </div>
 
               <label className="block text-sm font-medium text-gray-700">
-                Địa chỉ thường trú trước đây <span className="text-red-500">*</span>
+                Địa chỉ thường trú trước đây{" "}
+                <span className="text-red-500">*</span>
                 <textarea
                   required
                   value={formData.diaChiThuongTruTruoc}
@@ -2419,12 +2480,13 @@ export default function NhanKhau() {
                       )}
                     </td>
 
-                      {/* Số hộ khẩu */}
-                      <td className="px-4 py-3 text-sm text-gray-600">
-                        {nk.soHoKhau ||
-                          hoKhauList.find((hk) => hk.id === nk.hoKhauId)?.soHoKhau ||
-                          "-"}
-                      </td>
+                    {/* Số hộ khẩu */}
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {nk.soHoKhau ||
+                        hoKhauList.find((hk) => hk.id === nk.hoKhauId)
+                          ?.soHoKhau ||
+                        "-"}
+                    </td>
 
                     {/* CCCD */}
                     <td className="px-4 py-3 text-sm text-gray-600">
@@ -2506,7 +2568,9 @@ export default function NhanKhau() {
                         const total = (nk as any).totalReportsCount ?? 0;
                         const pending = (nk as any).pendingReportsCount ?? 0;
                         if (total <= 0) {
-                          return <span className="text-xs text-gray-400">0</span>;
+                          return (
+                            <span className="text-xs text-gray-400">0</span>
+                          );
                         }
 
                         return (

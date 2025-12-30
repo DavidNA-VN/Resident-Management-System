@@ -1,10 +1,38 @@
 import { useEffect, useState } from "react";
 import { apiService } from "../services/api";
 
+const formatYYYYMMDD = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+const getQuarterRange = (year: number, quarter: number) => {
+  const q = Math.min(4, Math.max(1, Number(quarter) || 1));
+  const startMonth = (q - 1) * 3;
+  const start = new Date(year, startMonth, 1);
+  const end = new Date(year, startMonth + 3, 0);
+  return { fromDate: formatYYYYMMDD(start), toDate: formatYYYYMMDD(end) };
+};
+
 export default function Feedbacks() {
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  
+
+  const now = new Date();
+  const initialYear = now.getFullYear();
+  const initialQuarter = Math.floor(now.getMonth() / 3) + 1;
+  const [statsYear, setStatsYear] = useState<number>(initialYear);
+  const [statsQuarter, setStatsQuarter] = useState<number>(initialQuarter);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [statsByStatus, setStatsByStatus] = useState<Record<
+    string,
+    number
+  > | null>(null);
+  const [statsTotal, setStatsTotal] = useState<number>(0);
+
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [showResponseModal, setShowResponseModal] = useState(false);
   const [currentFb, setCurrentFb] = useState<any>(null);
@@ -43,7 +71,32 @@ export default function Feedbacks() {
       console.error("Lỗi khi tải danh sách:", err);
     } finally {
       setIsLoading(false);
-      setSelectedIds([]); 
+      setSelectedIds([]);
+    }
+  };
+
+  const loadQuarterStats = async () => {
+    setStatsLoading(true);
+    setStatsError(null);
+    try {
+      const { fromDate, toDate } = getQuarterRange(statsYear, statsQuarter);
+      const res = await apiService.getFeedbackStats({ fromDate, toDate });
+      if (res && res.success) {
+        const map: Record<string, number> = {};
+        for (const row of res.data?.byStatus || []) {
+          map[String((row as any).status || "")] = Number(
+            (row as any).count || 0
+          );
+        }
+        setStatsByStatus(map);
+        setStatsTotal(Number(res.data?.total || 0));
+      } else {
+        setStatsError("Không thể tổng hợp thống kê theo quý");
+      }
+    } catch (e) {
+      setStatsError("Không thể tổng hợp thống kê theo quý");
+    } finally {
+      setStatsLoading(false);
     }
   };
 
@@ -73,8 +126,8 @@ export default function Feedbacks() {
   };
 
   const toggleSelect = (id: number) => {
-    setSelectedIds(prev => 
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
   };
 
@@ -83,16 +136,18 @@ export default function Feedbacks() {
       alert("Vui lòng chọn ít nhất 2 phản ánh để gộp!");
       return;
     }
-    if (window.confirm(`Bạn có chắc muốn gộp ${selectedIds.length} phản ánh này? Các phản ánh phụ sẽ được ẩn khỏi danh sách quản lý và xử lý chung với phản ánh chính.`)) {
+    if (
+      window.confirm(
+        `Bạn có chắc muốn gộp ${selectedIds.length} phản ánh này? Các phản ánh phụ sẽ được ẩn khỏi danh sách quản lý và xử lý chung với phản ánh chính.`
+      )
+    ) {
       try {
         const res = await apiService.merge(selectedIds);
         if (res.success) {
           alert("Gộp thành công! Hệ thống đã tối ưu danh sách hiển thị.");
-          await loadFeedbacks(); 
+          await loadFeedbacks();
         } else {
-          alert(
-            "Gộp thất bại: " + ((res as any)?.message || "Lỗi hệ thống")
-          );
+          alert("Gộp thất bại: " + ((res as any)?.message || "Lỗi hệ thống"));
         }
       } catch (err) {
         alert("Lỗi khi thực hiện gộp.");
@@ -112,21 +167,30 @@ export default function Feedbacks() {
     }
 
     try {
-      const res = await apiService.addResponse(currentFb.id, responderUnit, responseContent);
-      
+      const res = await apiService.addResponse(
+        currentFb.id,
+        responderUnit,
+        responseContent
+      );
+
       if (res && res.success) {
-        alert("Đã gửi phản hồi thành công! Tất cả các phản ánh liên quan đã được cập nhật trạng thái.");
+        alert(
+          "Đã gửi phản hồi thành công! Tất cả các phản ánh liên quan đã được cập nhật trạng thái."
+        );
         setShowResponseModal(false);
         setResponseContent("");
-        await loadFeedbacks(); 
+        await loadFeedbacks();
       } else {
         alert(
-          "Lỗi từ server: " + ((res as any)?.message || "Kiểm tra Database/Backend.")
+          "Lỗi từ server: " +
+            ((res as any)?.message || "Kiểm tra Database/Backend.")
         );
       }
     } catch (err: any) {
       console.error("Lỗi Catch:", err);
-      alert("Lỗi kết nối: " + (err.message || "Không thể kết nối đến máy chủ."));
+      alert(
+        "Lỗi kết nối: " + (err.message || "Không thể kết nối đến máy chủ.")
+      );
     }
   };
 
@@ -143,7 +207,7 @@ export default function Feedbacks() {
   // Cập nhật nhãn trạng thái để Tổ trưởng dễ phân biệt các bài Đã gộp
   const getStatusLabel = (status: string, ketQuaXuLy?: string) => {
     if (status === "dang_xu_ly" && ketQuaXuLy?.includes("Đã gộp vào")) {
-        return "Đã gộp";
+      return "Đã gộp";
     }
     const labels: Record<string, string> = {
       cho_xu_ly: "Chờ xử lý",
@@ -167,23 +231,123 @@ export default function Feedbacks() {
             </p>
           )}
         </div>
-        
+
         <div className="flex gap-3">
           {selectedIds.length >= 2 && (
-            <button 
+            <button
               onClick={handleMerge}
               className="px-5 py-2 text-sm bg-orange-600 text-white rounded-xl hover:bg-orange-700 shadow-lg font-bold transition-all"
             >
               🔗 Gộp làm một
             </button>
           )}
-          <button 
+          <button
             onClick={loadFeedbacks}
             className="px-5 py-2 text-sm bg-white border border-gray-200 rounded-xl hover:bg-gray-50 font-medium text-gray-700 shadow-sm transition-all"
           >
             🔄 Làm mới
           </button>
         </div>
+      </div>
+
+      <div className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="text-base font-extrabold text-gray-900">
+              Thống kê kiến nghị theo quý
+            </h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Tổng hợp số lượng theo trạng thái: mới ghi nhận, chưa giải quyết,
+              đã giải quyết...
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Quý
+              </label>
+              <select
+                value={statsQuarter}
+                onChange={(e) => setStatsQuarter(Number(e.target.value))}
+                className="w-28 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              >
+                <option value={1}>Quý 1</option>
+                <option value={2}>Quý 2</option>
+                <option value={3}>Quý 3</option>
+                <option value={4}>Quý 4</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Năm
+              </label>
+              <input
+                type="number"
+                min={2000}
+                max={2100}
+                value={statsYear}
+                onChange={(e) => setStatsYear(Number(e.target.value))}
+                className="w-28 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <button
+              onClick={loadQuarterStats}
+              className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-700"
+              disabled={statsLoading}
+              title="Tổng hợp thống kê theo quý"
+            >
+              {statsLoading ? "Đang tổng hợp..." : "Tổng hợp"}
+            </button>
+          </div>
+        </div>
+
+        {statsError && (
+          <div className="mt-3 rounded-xl bg-red-50 border border-red-200 p-3 text-red-700 text-sm">
+            {statsError}
+          </div>
+        )}
+
+        {!statsLoading && !statsByStatus && !statsError && (
+          <div className="mt-4 text-sm text-gray-500">
+            Chọn quý và bấm “Tổng hợp” để xem thống kê.
+          </div>
+        )}
+
+        {statsByStatus && (
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+            <div className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="text-xs text-gray-500">Mới ghi nhận</div>
+              <div className="mt-1 text-2xl font-extrabold text-gray-900">
+                {statsByStatus.cho_xu_ly || 0}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="text-xs text-gray-500">Chưa giải quyết</div>
+              <div className="mt-1 text-2xl font-extrabold text-gray-900">
+                {statsByStatus.dang_xu_ly || 0}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="text-xs text-gray-500">Đã giải quyết</div>
+              <div className="mt-1 text-2xl font-extrabold text-gray-900">
+                {statsByStatus.da_xu_ly || 0}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="text-xs text-gray-500">Từ chối</div>
+              <div className="mt-1 text-2xl font-extrabold text-gray-900">
+                {statsByStatus.tu_choi || 0}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-3">
+              <div className="text-xs text-gray-500">Tổng</div>
+              <div className="mt-1 text-2xl font-extrabold text-gray-900">
+                {statsTotal}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
@@ -238,22 +402,30 @@ export default function Feedbacks() {
       {isLoading ? (
         <div className="flex flex-col items-center justify-center p-20">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
-          <p className="mt-4 text-gray-500 font-medium">Đang cập nhật dữ liệu...</p>
+          <p className="mt-4 text-gray-500 font-medium">
+            Đang cập nhật dữ liệu...
+          </p>
         </div>
       ) : (
         <div className="grid gap-5">
           {feedbacks
             /* SỬA TẠI ĐÂY: Ẩn hoàn toàn các phản ánh phụ đã bị gộp khỏi danh sách quản lý của Tổ trưởng */
-            .filter(fb => !fb.ketQuaXuLy || !fb.ketQuaXuLy.includes("Đã gộp vào phản ánh ID:")) 
+            .filter(
+              (fb) =>
+                !fb.ketQuaXuLy ||
+                !fb.ketQuaXuLy.includes("Đã gộp vào phản ánh ID:")
+            )
             .map((fb) => (
-              <div 
-                key={fb.id} 
+              <div
+                key={fb.id}
                 className={`group bg-white border rounded-2xl p-6 shadow-sm transition-all duration-300 flex gap-5 ${
-                  selectedIds.includes(fb.id) ? "border-blue-400 ring-2 ring-blue-100 bg-blue-50/20" : "border-gray-100 hover:border-gray-300 hover:shadow-md"
+                  selectedIds.includes(fb.id)
+                    ? "border-blue-400 ring-2 ring-blue-100 bg-blue-50/20"
+                    : "border-gray-100 hover:border-gray-300 hover:shadow-md"
                 }`}
               >
                 <div className="pt-1">
-                  <input 
+                  <input
                     type="checkbox"
                     className="w-5 h-5 rounded-md border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer transition-transform group-hover:scale-110"
                     checked={selectedIds.includes(fb.id)}
@@ -263,33 +435,44 @@ export default function Feedbacks() {
 
                 <div className="flex-1">
                   <div className="flex justify-between items-start mb-3">
-                    <h3 className="font-bold text-gray-900 text-xl leading-snug">{fb.tieuDe}</h3>
+                    <h3 className="font-bold text-gray-900 text-xl leading-snug">
+                      {fb.tieuDe}
+                    </h3>
                     <div className="flex gap-2 items-center">
                       {fb.soLanPhanAnh > 1 && (
                         <span className="bg-orange-100 text-orange-700 text-[10px] px-2 py-1 rounded-lg font-black tracking-tighter uppercase shadow-sm border border-orange-200">
                           🔥 {fb.soLanPhanAnh} Lượt gửi
                         </span>
                       )}
-                      <span className={`px-3 py-1 rounded-lg text-[11px] font-bold border ${getStatusBadge(fb.trangThai)}`}>
+                      <span
+                        className={`px-3 py-1 rounded-lg text-[11px] font-bold border ${getStatusBadge(
+                          fb.trangThai
+                        )}`}
+                      >
                         {getStatusLabel(fb.trangThai, fb.ketQuaXuLy)}
                       </span>
                     </div>
                   </div>
-                  
-                  <p className="text-gray-600 mb-4 leading-relaxed">{fb.noiDung}</p>
+
+                  <p className="text-gray-600 mb-4 leading-relaxed">
+                    {fb.noiDung}
+                  </p>
 
                   <div className="flex flex-wrap gap-2 mb-5 items-center">
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Người gửi:</span>
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                      Người gửi:
+                    </span>
                     <div className="flex flex-wrap gap-1.5">
                       {fb.danhSachNguoi && fb.danhSachNguoi.length > 0 ? (
                         fb.danhSachNguoi.map((u: any, index: number) => (
-                          <span 
-                            key={index} 
+                          <span
+                            key={index}
                             role="button"
                             tabIndex={0}
                             onClick={() => openHistory(u)}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") openHistory(u);
+                              if (e.key === "Enter" || e.key === " ")
+                                openHistory(u);
                             }}
                             className="inline-flex cursor-pointer items-center px-2 py-0.5 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100 shadow-sm hover:bg-blue-100"
                           >
@@ -297,7 +480,9 @@ export default function Feedbacks() {
                           </span>
                         ))
                       ) : (
-                        <span className="text-xs text-gray-400 italic">Chưa xác định danh tính</span>
+                        <span className="text-xs text-gray-400 italic">
+                          Chưa xác định danh tính
+                        </span>
                       )}
                     </div>
                   </div>
@@ -307,34 +492,39 @@ export default function Feedbacks() {
                       <p className="font-bold text-emerald-800 flex items-center gap-2 mb-1">
                         <span className="text-lg">💬</span> Nội dung phản hồi:
                       </p>
-                      <p className="text-emerald-700 font-medium leading-relaxed">{fb.ketQuaXuLy}</p>
+                      <p className="text-emerald-700 font-medium leading-relaxed">
+                        {fb.ketQuaXuLy}
+                      </p>
                     </div>
                   )}
-                  
+
                   <div className="flex items-center justify-between pt-5 border-t border-gray-50 text-sm text-gray-400">
                     <div className="flex gap-6">
                       <span className="flex items-center gap-1.5 font-medium text-gray-500">
                         📂 {fb.loai}
                       </span>
                       <span className="flex items-center gap-1.5 font-medium text-gray-500">
-                        📅 {new Date(fb.ngayTao).toLocaleDateString('vi-VN')}
+                        📅 {new Date(fb.ngayTao).toLocaleDateString("vi-VN")}
                       </span>
                     </div>
-                    
-                    <button 
+
+                    <button
                       onClick={() => {
                         setCurrentFb(fb);
-                        setResponseContent(fb.ketQuaXuLy || ""); 
+                        setResponseContent(fb.ketQuaXuLy || "");
                         setShowResponseModal(true);
                       }}
                       className="text-blue-600 font-bold hover:text-blue-800 transition-all flex items-center gap-1 group/btn"
                     >
-                      Xử lý & Phản hồi <span className="group-hover/btn:translate-x-1 transition-transform">→</span>
+                      Xử lý & Phản hồi{" "}
+                      <span className="group-hover/btn:translate-x-1 transition-transform">
+                        →
+                      </span>
                     </button>
                   </div>
                 </div>
               </div>
-          ))}
+            ))}
         </div>
       )}
 
@@ -342,23 +532,31 @@ export default function Feedbacks() {
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity">
           <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full transform transition-all scale-100">
             <div className="p-8 border-b border-gray-50">
-              <h2 className="text-2xl font-bold text-gray-900">Xử lý phản ánh</h2>
-              <p className="text-sm text-gray-500 mt-2 line-clamp-1 italic">Vấn đề: "{currentFb?.tieuDe}"</p>
+              <h2 className="text-2xl font-bold text-gray-900">
+                Xử lý phản ánh
+              </h2>
+              <p className="text-sm text-gray-500 mt-2 line-clamp-1 italic">
+                Vấn đề: "{currentFb?.tieuDe}"
+              </p>
             </div>
-            
+
             <div className="p-8 space-y-6">
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Đơn vị xử lý</label>
-                <input 
-                  type="text" 
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                  Đơn vị xử lý
+                </label>
+                <input
+                  type="text"
                   value={responderUnit}
                   onChange={(e) => setResponderUnit(e.target.value)}
                   className="w-full px-5 py-3 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-medium"
                 />
               </div>
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Nội dung phản hồi cho dân</label>
-                <textarea 
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                  Nội dung phản hồi cho dân
+                </label>
+                <textarea
                   rows={5}
                   value={responseContent}
                   onChange={(e) => setResponseContent(e.target.value)}
@@ -369,13 +567,13 @@ export default function Feedbacks() {
             </div>
 
             <div className="p-8 bg-gray-50 flex justify-end gap-4 rounded-b-3xl">
-              <button 
+              <button
                 onClick={() => setShowResponseModal(false)}
                 className="px-6 py-3 text-gray-500 font-bold hover:text-gray-700 transition-colors"
               >
                 Đóng
               </button>
-              <button 
+              <button
                 onClick={handleSubmitResponse}
                 className="px-8 py-3 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 shadow-xl shadow-blue-200 active:scale-95 transition-all"
               >
@@ -391,7 +589,9 @@ export default function Feedbacks() {
           <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full">
             <div className="p-6 border-b border-gray-50 flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">Lịch sử phản ánh của người dân</h2>
+                <h2 className="text-xl font-bold text-gray-900">
+                  Lịch sử phản ánh của người dân
+                </h2>
                 <p className="mt-1 text-sm text-gray-500">
                   {historyUser?.fullName || "(Chưa có tên)"}
                   {historyUser?.username ? ` • ${historyUser.username}` : ""}
@@ -410,7 +610,9 @@ export default function Feedbacks() {
               {historyLoading ? (
                 <div className="flex flex-col items-center justify-center p-10">
                   <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-600"></div>
-                  <p className="mt-3 text-gray-500 font-medium">Đang tải lịch sử...</p>
+                  <p className="mt-3 text-gray-500 font-medium">
+                    Đang tải lịch sử...
+                  </p>
                 </div>
               ) : historyRows.length === 0 ? (
                 <p className="text-gray-500">Không có phản ánh nào.</p>
@@ -419,25 +621,41 @@ export default function Feedbacks() {
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-50 text-gray-600">
                       <tr>
-                        <th className="px-4 py-3 text-left font-bold">Tiêu đề</th>
-                        <th className="px-4 py-3 text-left font-bold">Chủ đề</th>
-                        <th className="px-4 py-3 text-left font-bold">Nội dung</th>
-                        <th className="px-4 py-3 text-left font-bold">Ngày tạo</th>
-                        <th className="px-4 py-3 text-left font-bold">Trạng thái</th>
+                        <th className="px-4 py-3 text-left font-bold">
+                          Tiêu đề
+                        </th>
+                        <th className="px-4 py-3 text-left font-bold">
+                          Chủ đề
+                        </th>
+                        <th className="px-4 py-3 text-left font-bold">
+                          Nội dung
+                        </th>
+                        <th className="px-4 py-3 text-left font-bold">
+                          Ngày tạo
+                        </th>
+                        <th className="px-4 py-3 text-left font-bold">
+                          Trạng thái
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {historyRows.map((r) => (
                         <tr key={r.id} className="border-t border-gray-100">
-                          <td className="px-4 py-3 font-semibold text-gray-900">{r.tieuDe}</td>
+                          <td className="px-4 py-3 font-semibold text-gray-900">
+                            {r.tieuDe}
+                          </td>
                           <td className="px-4 py-3 text-gray-600">{r.loai}</td>
                           <td className="px-4 py-3 text-gray-600 max-w-[420px]">
                             <div className="line-clamp-2">{r.noiDung}</div>
                           </td>
                           <td className="px-4 py-3 text-gray-600">
-                            {r.ngayTao ? new Date(r.ngayTao).toLocaleDateString("vi-VN") : ""}
+                            {r.ngayTao
+                              ? new Date(r.ngayTao).toLocaleDateString("vi-VN")
+                              : ""}
                           </td>
-                          <td className="px-4 py-3 text-gray-600">{r.trangThai}</td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {r.trangThai}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

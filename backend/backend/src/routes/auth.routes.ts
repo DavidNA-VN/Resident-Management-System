@@ -23,8 +23,9 @@ async function resolvePersonLink(username: string, personId?: number | null) {
       )
     : null;
 
-  if (personById && personById.rowCount > 0) {
-    const p = personById.rows[0];
+  const personByIdRow = personById?.rows?.[0];
+  if (personByIdRow) {
+    const p = personByIdRow;
     return {
       linked: true,
       personInfo: {
@@ -46,7 +47,7 @@ async function resolvePersonLink(username: string, personId?: number | null) {
       [normalizedCCCD]
     );
 
-    if (personByCCCD.rowCount > 0) {
+    if ((personByCCCD.rowCount ?? 0) > 0) {
       const p = personByCCCD.rows[0];
       return {
         linked: true,

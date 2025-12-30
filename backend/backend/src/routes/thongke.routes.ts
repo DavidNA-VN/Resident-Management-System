@@ -1,19 +1,61 @@
-import { Router } from 'express';
-import pool from '../database';
+import { Router } from "express";
+import pool from "../database";
 import { requireAnyTask, requireAuth } from "../middlewares/auth.middleware";
 
 const router = Router();
 
-router.get('/', requireAuth, requireAnyTask(["thongke"]), async (req, res) => {
+router.get("/", requireAuth, requireAnyTask(["thongke"]), async (req, res) => {
   try {
-    const { genders, ageGroups, residenceTypes, startDate, endDate } = req.query;
-    const gList = Array.isArray(genders) ? genders : genders ? [genders] : [];
-    const aList = Array.isArray(ageGroups) ? ageGroups : ageGroups ? [ageGroups] : [];
-    const rList = Array.isArray(residenceTypes) ? residenceTypes : residenceTypes ? [residenceTypes] : [];
+    const { genders, ageGroups, residenceTypes, startDate, endDate } =
+      req.query;
+    const gListRaw = Array.isArray(genders)
+      ? genders
+      : genders
+      ? [genders]
+      : [];
+    const aListRaw = Array.isArray(ageGroups)
+      ? ageGroups
+      : ageGroups
+      ? [ageGroups]
+      : [];
+    const rListRaw = Array.isArray(residenceTypes)
+      ? residenceTypes
+      : residenceTypes
+      ? [residenceTypes]
+      : [];
+
+    const allowedGenders = new Set(["nam", "nu", "khac"]);
+    const allowedAgeGroups = new Set([
+      "mam_non",
+      "mau_giao",
+      "cap_1",
+      "cap_2",
+      "cap_3",
+      "lao_dong",
+      "nghi_huu",
+    ]);
+    const allowedResidenceTypes = new Set([
+      "thuong_tru",
+      "tam_tru",
+      "tam_vang",
+    ]);
+
+    const gList = gListRaw
+      .map((v) => String(v))
+      .filter((v) => allowedGenders.has(v));
+    const aList = aListRaw
+      .map((v) => String(v))
+      .filter((v) => allowedAgeGroups.has(v));
+    const rList = rListRaw
+      .map((v) => String(v))
+      .filter((v) => allowedResidenceTypes.has(v));
 
     // 1. Xây dựng điều kiện lọc cơ bản cho nhân khẩu
     let baseFilter = ` WHERE nk."trangThai" != 'deleted'`;
-    if (gList.length > 0) baseFilter += ` AND nk."gioiTinh" IN (${gList.map(g => `'${g}'`).join(',')})`;
+    if (gList.length > 0)
+      baseFilter += ` AND nk."gioiTinh" IN (${gList
+        .map((g) => `'${g}'`)
+        .join(",")})`;
     if (startDate) baseFilter += ` AND nk."createdAt" >= '${startDate}'`;
     if (endDate) baseFilter += ` AND nk."createdAt" <= '${endDate}'`;
 
@@ -28,12 +70,16 @@ router.get('/', requireAuth, requireAnyTask(["thongke"]), async (req, res) => {
             WHEN a < 3 THEN 'mam_non' WHEN a BETWEEN 3 AND 5 THEN 'mau_giao'
             WHEN a BETWEEN 6 AND 10 THEN 'cap_1' WHEN a BETWEEN 11 AND 14 THEN 'cap_2'
             WHEN a BETWEEN 15 AND 17 THEN 'cap_3'
-            WHEN (("gioiTinh"='nam' AND a BETWEEN 18 AND 60) OR ("gioiTinh"='nu' AND a BETWEEN 18 AND 55)) THEN 'lao_dong'
-            WHEN (("gioiTinh"='nam' AND a > 60) OR ("gioiTinh"='nu' AND a > 55)) THEN 'nghi_huu' ELSE 'khac'
+            WHEN a BETWEEN 18 AND 59 THEN 'lao_dong'
+            WHEN a >= 60 THEN 'nghi_huu' ELSE 'khac'
           END as age_group
         FROM (SELECT "gioiTinh", EXTRACT(YEAR FROM AGE(CURRENT_DATE, "ngaySinh")) as a FROM nhan_khau nk ${baseFilter}) as sub
       ) as final
-      ${aList.length > 0 ? `WHERE age_group IN (${aList.map(a => `'${a}'`).join(',')})` : ''}
+      ${
+        aList.length > 0
+          ? `WHERE age_group IN (${aList.map((a) => `'${a}'`).join(",")})`
+          : ""
+      }
       GROUP BY age_group;
     `;
 
@@ -48,6 +94,16 @@ router.get('/', requireAuth, requireAnyTask(["thongke"]), async (req, res) => {
           nk."hoTen", 
           nk."gioiTinh", 
           EXTRACT(YEAR FROM AGE(CURRENT_DATE, nk."ngaySinh")) as age,
+          CASE 
+            WHEN EXTRACT(YEAR FROM AGE(CURRENT_DATE, nk."ngaySinh")) < 3 THEN 'mam_non'
+            WHEN EXTRACT(YEAR FROM AGE(CURRENT_DATE, nk."ngaySinh")) BETWEEN 3 AND 5 THEN 'mau_giao'
+            WHEN EXTRACT(YEAR FROM AGE(CURRENT_DATE, nk."ngaySinh")) BETWEEN 6 AND 10 THEN 'cap_1'
+            WHEN EXTRACT(YEAR FROM AGE(CURRENT_DATE, nk."ngaySinh")) BETWEEN 11 AND 14 THEN 'cap_2'
+            WHEN EXTRACT(YEAR FROM AGE(CURRENT_DATE, nk."ngaySinh")) BETWEEN 15 AND 17 THEN 'cap_3'
+            WHEN EXTRACT(YEAR FROM AGE(CURRENT_DATE, nk."ngaySinh")) BETWEEN 18 AND 59 THEN 'lao_dong'
+            WHEN EXTRACT(YEAR FROM AGE(CURRENT_DATE, nk."ngaySinh")) >= 60 THEN 'nghi_huu'
+            ELSE 'khac'
+          END as age_group,
           COALESCE(ttv.loai, 'thuong_tru') as status
         FROM nhan_khau nk
         LEFT JOIN (
@@ -58,7 +114,27 @@ router.get('/', requireAuth, requireAnyTask(["thongke"]), async (req, res) => {
         ) ttv ON nk.id = ttv."nhanKhauId"
         ${baseFilter}
       ) as sub_detail
-      ${rList.length > 0 ? `WHERE status IN (${rList.map(r => `'${r}'`).join(',')})` : ''}
+      ${
+        [
+          rList.length > 0
+            ? `status IN (${rList.map((r) => `'${r}'`).join(",")})`
+            : null,
+          aList.length > 0
+            ? `age_group IN (${aList.map((a) => `'${a}'`).join(",")})`
+            : null,
+        ].filter(Boolean).length > 0
+          ? `WHERE ${[
+              rList.length > 0
+                ? `status IN (${rList.map((r) => `'${r}'`).join(",")})`
+                : null,
+              aList.length > 0
+                ? `age_group IN (${aList.map((a) => `'${a}'`).join(",")})`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" AND ")}`
+          : ""
+      }
       ORDER BY "hoTen" ASC;
     `;
 
@@ -66,14 +142,14 @@ router.get('/', requireAuth, requireAnyTask(["thongke"]), async (req, res) => {
     const [demographics, residence, details] = await Promise.all([
       pool.query(mainQuery),
       pool.query(resSummaryQuery),
-      pool.query(detailQuery)
+      pool.query(detailQuery),
     ]);
 
-    res.json({ 
-      success: true, 
-      demographics: demographics.rows, 
+    res.json({
+      success: true,
+      demographics: demographics.rows,
       residence: residence.rows,
-      details: details.rows 
+      details: details.rows,
     });
   } catch (err: any) {
     console.error("Lỗi Backend ThongKe:", err.message);

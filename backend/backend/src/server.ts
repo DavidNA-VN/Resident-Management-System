@@ -15,7 +15,8 @@ import requestsRoutes from "./routes/requests.routes";
 import feedbackRoutes from "./routes/feedback.routes";
 import path from "path";
 import dotenv from "dotenv";
-import thongKeRoutes from './routes/thongke.routes';
+import thongKeRoutes from "./routes/thongke.routes";
+import dashboardRoutes from "./routes/dashboard.routes";
 // Load environment variables
 dotenv.config();
 
@@ -32,7 +33,7 @@ const PORT = Number(process.env.PORT || 3000);
 
 // Function to find available port starting from specified port
 async function findAvailablePort(startPort: number): Promise<number> {
-  const net = await import('net');
+  const net = await import("net");
 
   for (let port = startPort; port < startPort + 100; port++) {
     try {
@@ -41,7 +42,7 @@ async function findAvailablePort(startPort: number): Promise<number> {
         server.listen(port, () => {
           server.close(() => resolve(port));
         });
-        server.on('error', () => reject(new Error(`Port ${port} is in use`)));
+        server.on("error", () => reject(new Error(`Port ${port} is in use`)));
       });
       return port;
     } catch (error) {
@@ -51,7 +52,7 @@ async function findAvailablePort(startPort: number): Promise<number> {
   }
   throw new Error(`No available ports found starting from ${startPort}`);
 }
-app.use('/api/thongke', thongKeRoutes);
+app.use("/api/thongke", thongKeRoutes);
 // Mount API routes under /api to standardize frontend/backend prefix
 // Mount only auth routes for now to enable login
 app.use("/api", authRoutes);
@@ -69,6 +70,7 @@ app.use("/api", requestsRoutes);
 // app.use("/api", citizenRoutes);
 // app.use("/api", requestsRoutes); // Commented out - causes errorMissingColumn
 app.use("/api", feedbackRoutes);
+app.use("/api", dashboardRoutes);
 
 // Serve uploaded files statically
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
@@ -89,12 +91,16 @@ async function startServer() {
       console.log(`✅ Backend running on http://localhost:${availablePort}`);
       console.log(`✅ API available at http://localhost:${availablePort}/api`);
       if (availablePort !== PORT) {
-        console.log(`⚠️  Port ${PORT} was occupied, using ${availablePort} instead`);
-        console.log(`💡 To use port ${PORT} next time, kill process using: taskkill /PID <PID> /F`);
+        console.log(
+          `⚠️  Port ${PORT} was occupied, using ${availablePort} instead`
+        );
+        console.log(
+          `💡 To use port ${PORT} next time, kill process using: taskkill /PID <PID> /F`
+        );
       }
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    console.error("❌ Failed to start server:", error);
     process.exit(1);
   }
 }

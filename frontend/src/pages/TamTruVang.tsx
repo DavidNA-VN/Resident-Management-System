@@ -164,7 +164,8 @@ export default function TamTruVang() {
       statusFilter === "all"
         ? byType
         : byType.filter(
-            (item) => normalizeStatus(item.status) === normalizeStatus(statusFilter)
+            (item) =>
+              normalizeStatus(item.status) === normalizeStatus(statusFilter)
           );
 
     const byDate = byStatus.filter((item) => {
@@ -286,7 +287,8 @@ export default function TamTruVang() {
         const qp2 = new URLSearchParams();
         if (paramsForLog2.type) qp2.append("type", paramsForLog2.type);
         if (paramsForLog2.status) qp2.append("status", paramsForLog2.status);
-        if (paramsForLog2.fromDate) qp2.append("fromDate", paramsForLog2.fromDate);
+        if (paramsForLog2.fromDate)
+          qp2.append("fromDate", paramsForLog2.fromDate);
         if (paramsForLog2.toDate) qp2.append("toDate", paramsForLog2.toDate);
         if (paramsForLog2.keyword) qp2.append("keyword", paramsForLog2.keyword);
         qp2.append("page", String(paramsForLog2.page));

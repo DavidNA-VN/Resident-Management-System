@@ -91,9 +91,20 @@ export default function HoKhau() {
       trangThai: "Trạng thái",
       chuHoId: "Chủ hộ",
       ghiChu: "Ghi chú",
+      tach_ho: "Tách hộ khẩu",
+      createdAt: "Ngày tạo",
+      updatedAt: "Ngày cập nhật",
     }),
     []
   );
+
+  const formatHistoryAction = (raw: any) => {
+    const key = String(raw || "").toLowerCase();
+    if (key === "create") return "Tạo mới";
+    if (key === "update") return "Cập nhật";
+    if (key === "delete") return "Xóa";
+    return raw || "(không rõ)";
+  };
 
   const emptyMemberFull: NhanKhauFull = {
     id: 0,
@@ -170,7 +181,10 @@ export default function HoKhau() {
     setIsLoading(true);
     try {
       const soHoKhau = String(opts?.soHoKhau || "").trim();
-      const response = await apiService.getHoKhauList(undefined, soHoKhau || undefined);
+      const response = await apiService.getHoKhauList(
+        undefined,
+        soHoKhau || undefined
+      );
       if (response.success) {
         setHoKhauList(response.data);
       }
@@ -232,10 +246,149 @@ export default function HoKhau() {
   };
 
   const formatHistoryValue = (field: string, raw: any) => {
+    const formatScalar = (v: any) => {
+      if (v === null || v === undefined) return "(trống)";
+      const s = String(v).trim();
+      return s === "" ? "(trống)" : s;
+    };
+
+    const formatMember = (m: any): string => {
+      if (!m) return "";
+      if (typeof m === "object") {
+        const name = m.hoTen || m.name;
+        const id = m.id;
+        if (name && id !== undefined && id !== null) return `${name} (ID: ${id})`;
+        if (name) return String(name);
+      }
+      return formatScalar(m);
+    };
+
+    const formatAny = (v: any, keyHint?: string): string => {
+      if (v === null || v === undefined) return "(trống)";
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+        return formatScalar(v);
+      }
+      if (Array.isArray(v)) {
+        if (keyHint === "members") {
+          const items: string[] = v
+            .map(formatMember)
+            .filter((s): s is string => Boolean(s));
+          return items.length ? items.join(", ") : "(trống)";
+        }
+        const items: string[] = v
+          .map((x) => formatAny(x))
+          .filter((s): s is string => Boolean(s));
+        return items.length ? items.join(", ") : "(trống)";
+      }
+      if (typeof v === "object") {
+        // Common shapes
+        if ((v as any).hoTen || (v as any).name) return formatMember(v);
+        // Fallback: show a few key/value pairs
+        const entries: string[] = Object.entries(v as any)
+          .slice(0, 6)
+          .map(([k, vv]) => {
+            const label = (historyFieldLabels as Record<string, string>)[k] || k;
+            return `${label}: ${formatAny(vv, k)}`;
+          });
+        return entries.length ? entries.join("; ") : "(trống)";
+      }
+      return formatScalar(v);
+    };
+
+    const tryParseJson = (s: string) => {
+      const trimmed = s.trim();
+      if (!trimmed) return null;
+      if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return null;
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return null;
+      }
+    };
+
+    const f = String(field || "").trim();
+
+    // If backend stored JSON-ish in text, try to parse and render compactly
+    if (typeof raw === "string") {
+      const parsed = tryParseJson(raw);
+      if (parsed !== null) {
+        if (Array.isArray(parsed)) {
+          const items = parsed
+            .map((x) => {
+              if (x && typeof x === "object") {
+                const maybeName = (x as any).hoTen || (x as any).name;
+                const maybeId = (x as any).id;
+                if (maybeName && maybeId)
+                  return `${maybeName} (ID: ${maybeId})`;
+                if (maybeName) return String(maybeName);
+              }
+              return formatAny(x);
+            })
+            .filter(Boolean);
+          return items.length ? items.join(", ") : "(trống)";
+        }
+
+        if (parsed && typeof parsed === "object") {
+          const obj: any = parsed;
+
+          // Special: record created by "tách hộ" approval
+          if (f === "tach_ho") {
+            const parts: string[] = [];
+            if (obj.sourceSoHoKhau || obj.sourceHouseholdId) {
+              const so = obj.sourceSoHoKhau ? String(obj.sourceSoHoKhau) : "(không rõ)";
+              const id = obj.sourceHouseholdId !== undefined && obj.sourceHouseholdId !== null ? String(obj.sourceHouseholdId) : "(không rõ)";
+              parts.push(`Từ hộ khẩu: ${so} (ID: ${id})`);
+            }
+            if (obj.movedToSoHoKhau || obj.movedToHouseholdId) {
+              const so = obj.movedToSoHoKhau ? String(obj.movedToSoHoKhau) : "(không rõ)";
+              const id = obj.movedToHouseholdId !== undefined && obj.movedToHouseholdId !== null ? String(obj.movedToHouseholdId) : "(không rõ)";
+              parts.push(`Sang hộ khẩu: ${so} (ID: ${id})`);
+            }
+            if (Array.isArray(obj.members)) {
+              const members = obj.members.map(formatMember).filter(Boolean);
+              parts.push(`Thành viên: ${members.length ? members.join(", ") : "(trống)"}`);
+            }
+            return parts.length ? parts.join("; ") : "(trống)";
+          }
+
+          // If this is a full-record snapshot (create with truong null), show key fields in Vietnamese and hide noisy keys
+          if (!f) {
+            const orderedKeys = [
+              "soHoKhau",
+              "diaChi",
+              "diaChiDayDu",
+              "tinhThanh",
+              "quanHuyen",
+              "phuongXa",
+              "duongPho",
+              "soNha",
+              "ngayCap",
+              "trangThai",
+              "chuHoId",
+              "ghiChu",
+            ];
+
+            const entries = orderedKeys
+              .filter((k) => obj[k] !== undefined)
+              .map((k) => {
+                const label = (historyFieldLabels as Record<string, string>)[k] || k;
+                return `${label}: ${formatAny(obj[k], k)}`;
+              });
+            return entries.length ? entries.join("; ") : "(trống)";
+          }
+
+          return formatAny(obj);
+        }
+      }
+    }
+
+    // Handle already-parsed JSON values defensively
+    if (raw && typeof raw === "object") {
+      return formatAny(raw);
+    }
+
     const value = raw === null || raw === undefined ? "" : String(raw).trim();
     if (value === "") return "(trống)";
-
-    const f = String(field || "");
     if (f === "ngayCap") {
       // Expect YYYY-MM-DD; keep safe fallback
       const parts = value.split("-");
@@ -247,8 +400,11 @@ export default function HoKhau() {
 
     if (f === "trangThai") {
       const normalized = value.toLowerCase();
-      if (normalized === "active" || normalized === "da_kich_hoat") return "Đã kích hoạt";
-      if (normalized === "inactive" || normalized === "chua_kich_hoat") return "Chưa kích hoạt";
+      if (normalized === "active" || normalized === "da_kich_hoat")
+        return "Đã kích hoạt";
+      if (normalized === "inactive" || normalized === "chua_kich_hoat")
+        return "Chưa kích hoạt";
+      if (normalized === "deleted" || normalized === "da_xoa") return "Đã xóa";
       return value;
     }
 
@@ -311,33 +467,37 @@ export default function HoKhau() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {historyList.map((h) => (
-                    <tr key={h.id}>
-                      <td className="px-3 py-2">
-                        {new Date(h.createdAt).toLocaleString("vi-VN")}
-                      </td>
-                      <td className="px-3 py-2">{h.hanhDong}</td>
-                      <td className="px-3 py-2">
-                        {(historyFieldLabels as Record<string, string>)[
-                          String(h.truong)
-                        ] || h.truong}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="text-xs text-gray-600">
-                          <span className="text-gray-500">
-                            {formatHistoryValue(h.truong, h.noiDungCu)}
-                          </span>
-                          <span className="mx-2 text-gray-400">→</span>
-                          <span className="text-gray-900">
-                            {formatHistoryValue(h.truong, h.noiDungMoi)}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        {h.nguoiThucHienName || "-"}
-                      </td>
-                    </tr>
-                  ))}
+                  {historyList.map((h) => {
+                    const actionLabel = formatHistoryAction(h.hanhDong);
+                    const truongKey = h?.truong ? String(h.truong) : "";
+                    const fieldLabel = truongKey
+                      ? (historyFieldLabels as Record<string, string>)[truongKey] || truongKey
+                      : actionLabel === "Tạo mới"
+                      ? "(toàn bộ bản ghi)"
+                      : "(không rõ)";
+
+                    return (
+                      <tr key={h.id}>
+                        <td className="px-3 py-2">
+                          {new Date(h.createdAt).toLocaleString("vi-VN")}
+                        </td>
+                        <td className="px-3 py-2">{actionLabel}</td>
+                        <td className="px-3 py-2">{fieldLabel}</td>
+                        <td className="px-3 py-2">
+                          <div className="text-xs text-gray-600">
+                            <span className="text-gray-500">
+                              {formatHistoryValue(h.truong, h.noiDungCu)}
+                            </span>
+                            <span className="mx-2 text-gray-400">→</span>
+                            <span className="text-gray-900">
+                              {formatHistoryValue(h.truong, h.noiDungMoi)}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">{h.nguoiThucHienName || "-"}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
