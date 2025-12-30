@@ -80,4 +80,84 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /thongke/phan-anh - Thống kê về các phản ánh
+router.get('/phan-anh', async (req, res) => {
+  try {
+    const { loai, tuNgay, denNgay, trangThai } = req.query;
+    
+    let where = [];
+    let params: any[] = [];
+    let idx = 1;
+
+    // Lọc theo loại phản ánh
+    if (loai && loai !== 'all') {
+      where.push(`pa.loai = $${idx++}`);
+      params.push(loai);
+    }
+
+    // Lọc theo ngày từ
+    if (tuNgay) {
+      where.push(`pa."ngayTao" >= $${idx++}`);
+      params.push(tuNgay);
+    }
+
+    // Lọc theo ngày đến
+    if (denNgay) {
+      where.push(`pa."ngayTao" <= $${idx++}`);
+      params.push(denNgay + ' 23:59:59'); // Bao gồm cả ngày cuối
+    }
+
+    // Lọc theo trạng thái xử lý
+    // "chua_xu_ly" = cho_xu_ly, "da_xu_ly" = da_xu_ly
+    if (trangThai === 'chua_xu_ly') {
+      where.push(`pa."trangThai" = $${idx++}`);
+      params.push('cho_xu_ly');
+    } else if (trangThai === 'da_xu_ly') {
+      where.push(`pa."trangThai" = $${idx++}`);
+      params.push('da_xu_ly');
+    }
+
+    // Ẩn các phản ánh đã bị gộp
+    where.push(`(pa."ketQuaXuLy" IS NULL OR pa."ketQuaXuLy" NOT LIKE 'Đã gộp vào phản ánh ID: %')`);
+
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    // Query lấy danh sách phản ánh với thông tin người phản ánh (CCCD và tên)
+    // Lấy người phản ánh đầu tiên từ phan_anh_nguoi
+    const querySql = `
+      SELECT 
+        pa.id,
+        pa."tieuDe",
+        pa."noiDung",
+        pa.loai,
+        pa."trangThai",
+        pa."ngayTao",
+        COALESCE(nk.cccd, u.username) as cccd,
+        COALESCE(nk."hoTen", u."fullName") as ten
+      FROM phan_anh pa
+      LEFT JOIN LATERAL (
+        SELECT pan."nguoiPhanAnhId"
+        FROM phan_anh_nguoi pan
+        WHERE pan."phanAnhId" = pa.id
+        ORDER BY pan.id ASC
+        LIMIT 1
+      ) first_reporter ON true
+      LEFT JOIN users u ON first_reporter."nguoiPhanAnhId" = u.id
+      LEFT JOIN nhan_khau nk ON u."personId" = nk.id
+      ${whereClause}
+      ORDER BY pa."ngayTao" DESC
+    `;
+
+    const result = await pool.query(querySql, params);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (err: any) {
+    console.error("Lỗi Backend Thống kê Phản ánh:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;

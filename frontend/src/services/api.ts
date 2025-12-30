@@ -562,6 +562,34 @@ class ApiService {
     );
   }
 
+  // Thống kê phản ánh
+  async getPhanAnhThongKe(params: { 
+    loai?: string; 
+    tuNgay?: string; 
+    denNgay?: string; 
+    trangThai?: string;
+  } = {}) {
+    const query = new URLSearchParams();
+    if (params.loai) query.append("loai", params.loai);
+    if (params.tuNgay) query.append("tuNgay", params.tuNgay);
+    if (params.denNgay) query.append("denNgay", params.denNgay);
+    if (params.trangThai) query.append("trangThai", params.trangThai);
+
+    return this.request<{
+      success: boolean;
+      data: Array<{
+        id: number;
+        tieuDe: string;
+        noiDung: string;
+        loai: string;
+        trangThai: string;
+        ngayTao: string;
+        cccd: string;
+        ten: string;
+      }>;
+    }>(`/thongke/phan-anh?${query.toString()}`, { method: "GET" });
+  }
+
   // TODO: Thay bằng API thật khi backend có endpoint /citizen/my-household
   // GET /citizen/my-household - Lấy hộ khẩu và danh sách nhân khẩu của người dân
   async getMyHousehold() {

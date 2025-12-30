@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useReactToPrint } from 'react-to-print';
+import { apiService } from '../services/api';
 
 const AGE_GROUPS = [
   { id: 'mam_non', label: 'Mầm non (<3t)' },
@@ -18,6 +19,38 @@ const RESIDENCE_TYPES = [
   { id: 'tam_vang', label: 'Tạm vắng' }
 ];
 
+const FEEDBACK_TYPES = [
+  { id: 'all', label: 'Tất cả' },
+  { id: 'co_so_ha_tang', label: 'Cơ sở hạ tầng' },
+  { id: 'moi_truong', label: 'Môi trường' },
+  { id: 'an_ninh', label: 'An ninh' },
+  { id: 'y_te', label: 'Y tế' },
+  { id: 'giao_duc', label: 'Giáo dục' },
+  { id: 'khac', label: 'Khác' },
+];
+
+const FEEDBACK_STATUSES = [
+  { id: 'all', label: 'Tất cả' },
+  { id: 'chua_xu_ly', label: 'Chưa xử lý' },
+  { id: 'da_xu_ly', label: 'Đã xử lý' },
+];
+
+const loaiLabels: Record<string, string> = {
+  co_so_ha_tang: "Cơ sở hạ tầng",
+  moi_truong: "Môi trường",
+  an_ninh: "An ninh",
+  y_te: "Y tế",
+  giao_duc: "Giáo dục",
+  khac: "Khác",
+};
+
+const statusLabels: Record<string, string> = {
+  cho_xu_ly: "Chưa xử lý",
+  dang_xu_ly: "Đang xử lý",
+  da_xu_ly: "Đã xử lý",
+  tu_choi: "Từ chối",
+};
+
 export default function ThongKe() {
   const componentRef = useRef<HTMLDivElement>(null);
   // Cập nhật state để chứa mảng details từ Backend
@@ -28,6 +61,17 @@ export default function ThongKe() {
     residenceTypes: ['thuong_tru', 'tam_tru', 'tam_vang']
   });
   const [showDetails, setShowDetails] = useState(false);
+  
+  // State cho thống kê phản ánh
+  const [phanAnhData, setPhanAnhData] = useState<any[]>([]);
+  const [phanAnhFilters, setPhanAnhFilters] = useState({
+    loai: 'all',
+    tuNgay: '',
+    denNgay: '',
+    trangThai: 'all'
+  });
+  const [isLoadingPhanAnh, setIsLoadingPhanAnh] = useState(false);
+
   const loadData = async () => {
     try {
       const params = new URLSearchParams();
@@ -43,6 +87,28 @@ export default function ThongKe() {
   };
 
   useEffect(() => { loadData(); }, [filters]);
+
+  const loadPhanAnhData = async () => {
+    setIsLoadingPhanAnh(true);
+    try {
+      const params: any = {};
+      if (phanAnhFilters.loai !== 'all') params.loai = phanAnhFilters.loai;
+      if (phanAnhFilters.tuNgay) params.tuNgay = phanAnhFilters.tuNgay;
+      if (phanAnhFilters.denNgay) params.denNgay = phanAnhFilters.denNgay;
+      if (phanAnhFilters.trangThai !== 'all') params.trangThai = phanAnhFilters.trangThai;
+
+      const res = await apiService.getPhanAnhThongKe(params);
+      if (res.success) {
+        setPhanAnhData(res.data || []);
+      }
+    } catch (err) {
+      console.error("Lỗi kết nối API phản ánh:", err);
+    } finally {
+      setIsLoadingPhanAnh(false);
+    }
+  };
+
+  useEffect(() => { loadPhanAnhData(); }, [phanAnhFilters]);
 
   const handlePrint = useReactToPrint({
     contentRef: componentRef,
@@ -208,6 +274,123 @@ export default function ThongKe() {
     </div>
   )}
 </section>
+
+          {/* 3. THỐNG KÊ VỀ CÁC PHẢN ÁNH */}
+          <section className="mt-8">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
+              📝 3. Thống kê về các phản ánh
+            </h2>
+
+            {/* Bộ lọc phản ánh */}
+            <div className="bg-gray-50 p-6 rounded-xl mb-6 border border-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Lọc theo loại phản ánh */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Loại phản ánh</label>
+                  <select
+                    value={phanAnhFilters.loai}
+                    onChange={(e) => setPhanAnhFilters({...phanAnhFilters, loai: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    {FEEDBACK_TYPES.map(type => (
+                      <option key={type.id} value={type.id}>{type.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Lọc theo ngày từ */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Từ ngày</label>
+                  <input
+                    type="date"
+                    value={phanAnhFilters.tuNgay}
+                    onChange={(e) => setPhanAnhFilters({...phanAnhFilters, tuNgay: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Lọc theo ngày đến */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Đến ngày</label>
+                  <input
+                    type="date"
+                    value={phanAnhFilters.denNgay}
+                    onChange={(e) => setPhanAnhFilters({...phanAnhFilters, denNgay: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Lọc theo trạng thái xử lý */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Trạng thái xử lý</label>
+                  <select
+                    value={phanAnhFilters.trangThai}
+                    onChange={(e) => setPhanAnhFilters({...phanAnhFilters, trangThai: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    {FEEDBACK_STATUSES.map(status => (
+                      <option key={status.id} value={status.id}>{status.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Bảng hiển thị phản ánh */}
+            {isLoadingPhanAnh ? (
+              <div className="flex justify-center items-center p-10">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600"></div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto border rounded-xl shadow-inner bg-gray-50 p-4">
+                <table className="w-full text-lg border-collapse border border-gray-300 bg-white">
+                  <thead className="bg-blue-600 text-white uppercase font-bold text-sm">
+                    <tr>
+                      <th className="border border-gray-300 p-3 text-center w-16">STT</th>
+                      <th className="border border-gray-300 p-3 text-left">Số CCCD</th>
+                      <th className="border border-gray-300 p-3 text-left">Tên</th>
+                      <th className="border border-gray-300 p-3 text-left">Loại phản ánh</th>
+                      <th className="border border-gray-300 p-3 text-left">Nội dung phản ánh</th>
+                      <th className="border border-gray-300 p-3 text-center">Ngày phản ánh</th>
+                      <th className="border border-gray-300 p-3 text-center">Trạng thái xử lý</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {phanAnhData && phanAnhData.length > 0 ? (
+                      phanAnhData.map((item: any, idx: number) => (
+                        <tr key={item.id} className="hover:bg-blue-50">
+                          <td className="border border-gray-300 p-3 text-center text-gray-500">{idx + 1}</td>
+                          <td className="border border-gray-300 p-3 font-mono text-sm">{item.cccd || 'N/A'}</td>
+                          <td className="border border-gray-300 p-3 font-bold">{item.ten || 'N/A'}</td>
+                          <td className="border border-gray-300 p-3">{loaiLabels[item.loai] || item.loai}</td>
+                          <td className="border border-gray-300 p-3">{item.noiDung || item.tieuDe}</td>
+                          <td className="border border-gray-300 p-3 text-center">
+                            {item.ngayTao ? new Date(item.ngayTao).toLocaleDateString('vi-VN') : 'N/A'}
+                          </td>
+                          <td className="border border-gray-300 p-3 text-center">
+                            <span className={`px-3 py-1 rounded-lg text-xs font-bold ${
+                              item.trangThai === 'cho_xu_ly' ? 'bg-yellow-100 text-yellow-700' :
+                              item.trangThai === 'dang_xu_ly' ? 'bg-blue-100 text-blue-700' :
+                              item.trangThai === 'da_xu_ly' ? 'bg-green-100 text-green-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {statusLabels[item.trangThai] || item.trangThai}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="border border-gray-300 p-10 text-center text-gray-400 italic">
+                          Không tìm thấy phản ánh nào khớp với bộ lọc.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
 
         
         </div>
