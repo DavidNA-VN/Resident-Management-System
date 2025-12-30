@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, useEffect } from "react";
-import RequestModal from "../../components/RequestModal";
+import RequestModal from "../../components/RequestModal.jsx";
 import SplitHouseholdRequestModal from "../../components/SplitHouseholdRequestModal";
 import { apiService } from "../../services/api";
 const requestTypeLabels = {

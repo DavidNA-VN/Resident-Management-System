@@ -124,15 +124,20 @@ export default function YeuCau() {
     }
   };
 
-  // Load household data khi mở modal tách hộ khẩu hoặc thêm con sơ sinh
+  // Load household data khi mở các modal cần hộ khẩu (tạm trú/vắng, tách hộ, thêm con sơ sinh, thêm nhân khẩu)
   useEffect(() => {
-    if (
-      (selectedType === "TACH_HO_KHAU" || selectedType === "ADD_NEWBORN") &&
-      !householdInfo
-    ) {
+    const needsHousehold = [
+      "TACH_HO_KHAU",
+      "ADD_NEWBORN",
+      "ADD_PERSON",
+      "TAM_TRU",
+      "TAM_VANG",
+    ];
+
+    if (selectedType && needsHousehold.includes(selectedType) && !householdInfo) {
       loadHouseholdData();
     }
-  }, [selectedType]);
+  }, [selectedType, householdInfo]);
 
   const loadHouseholdData = async () => {
     setIsLoadingHousehold(true);

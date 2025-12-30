@@ -223,6 +223,39 @@ router.post(
         type === RequestType.TEMPORARY_RESIDENCE ||
         type === "TAM_TRU"
       ) {
+        // Gắn hộ khẩu đích và địa chỉ mặc định theo hộ của chủ hộ (người tạo đơn)
+        if (payload && typeof payload === "object") {
+          const residenceData = payload.residence || payload;
+          if (!residenceData.householdId) {
+            residenceData.householdId = headContext.householdId;
+          }
+          if (!residenceData.hoKhauId) {
+            residenceData.hoKhauId = headContext.householdId;
+          }
+          if (!residenceData.targetHouseholdId) {
+            residenceData.targetHouseholdId = headContext.householdId;
+          }
+
+          // Địa chỉ tạm trú mặc định: "Số hộ khẩu (địa chỉ cụ thể)"
+          try {
+            const hkInfo = await query(
+              `SELECT "soHoKhau", "diaChi" FROM ho_khau WHERE id = $1`,
+              [headContext.householdId]
+            );
+            if ((hkInfo?.rowCount ?? 0) > 0 && !residenceData.diaChi) {
+              const row = hkInfo.rows[0];
+              const soHoKhau = row.soHoKhau || "";
+              const diaChi = row.diaChi || "";
+              const combined = `${soHoKhau}${soHoKhau && diaChi ? " " : ""}${diaChi}`.trim();
+              if (combined) {
+                residenceData.diaChi = combined;
+              }
+            }
+          } catch (e) {
+            // Nếu lỗi truy vấn, bỏ qua và để validation xử lý nếu thiếu diaChi
+          }
+        }
+
         validationError = validateTemporaryResidencePayload(payload);
         const nhanKhauId =
           payload?.nhanKhauId || payload?.residence?.nhanKhauId || null;
@@ -242,6 +275,15 @@ router.post(
             });
           }
           finalTargetPersonId = Number(nhanKhauId);
+        }
+        // Gắn hộ khẩu đích là hộ của chủ hộ để thêm người mới nếu cần
+        finalTargetHouseholdId = headContext.householdId;
+        // Ghi chú mặc định nếu thiếu
+        if (payload && typeof payload === "object") {
+          const residenceData = payload.residence || payload;
+          if (!residenceData.ghiChu) {
+            residenceData.ghiChu = "Tạm trú";
+          }
         }
       } else if (
         type === RequestType.TEMPORARY_ABSENCE ||
@@ -478,6 +520,8 @@ router.get(
         (r.payload->>'diaChi') as "diaChi",
         NULLIF(r.payload->>'nhanKhauId','')::int as "nhanKhauId",
         u."fullName" as "requesterName",
+        u.username as "requesterUsername",
+        u.cccd as "requesterCccd",
         nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
         hk.id as "householdId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress"
       FROM requests r
@@ -542,6 +586,8 @@ router.get(
           ttv."diaChi" AS "diaChi",
           ttv."nhanKhauId" AS "nhanKhauId",
           u."fullName" AS "requesterName",
+          u.username AS "requesterUsername",
+          u.cccd AS "requesterCccd",
           nk.id AS "personId", nk."hoTen" AS "personName", nk.cccd AS "personCccd",
           hk.id AS "householdId", hk."soHoKhau" AS "householdCode", hk."diaChi" AS "householdAddress"
         FROM tam_tru_vang ttv
@@ -580,9 +626,9 @@ router.get(
           };
 
           const nguoiGui = {
-            hoTen: row.requesterName || row.personName || null,
-            username: row.personCccd || null,
-            cccd: row.personCccd || null,
+            hoTen: row.requesterName || null,
+            username: row.requesterUsername || null,
+            cccd: row.requesterCccd || null,
           };
 
           return {
@@ -700,6 +746,47 @@ router.post(
       const tuNgay = parsedPayload?.tuNgay;
       const denNgay = parsedPayload?.denNgay || null;
       const lyDo = parsedPayload?.lyDo || parsedPayload?.reason || null;
+
+      const isTamTruRequest =
+        reqRow.type === "TAM_TRU" || reqRow.type === "TEMPORARY_RESIDENCE";
+
+      // New flow: nếu thiếu nhanKhauId nhưng có person thì ủy quyền cho handler tạm trú mới
+      if (isTamTruRequest && (!nhanKhauId || !tuNgay || !lyDo)) {
+        try {
+          const handlerResult = await processTemporaryResidenceApproval(
+            requestId,
+            parsedPayload,
+            reviewerId,
+            reqRow.targetHouseholdId,
+            reqRow.targetPersonId
+          );
+
+          if (handlerResult?.id) {
+            await query(
+              `UPDATE requests SET "targetPersonId" = $1 WHERE id = $2`,
+              [handlerResult.id, requestId]
+            );
+          }
+
+          await query(
+            `UPDATE requests SET status = 'APPROVED', "reviewedBy" = $1, "reviewedAt" = CURRENT_TIMESTAMP WHERE id = $2`,
+            [reviewerId, requestId]
+          );
+
+          return res.json({
+            success: true,
+            data: { id: requestId, status: "approved" },
+          });
+        } catch (err) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: err.code || "VALIDATION_ERROR",
+              message: err.message || "Không thể duyệt yêu cầu tạm trú",
+            },
+          });
+        }
+      }
 
       if (!nhanKhauId || !tuNgay || !lyDo) {
         return res.status(400).json({
@@ -1008,42 +1095,53 @@ function validateAddPersonPayload(
 function validateTemporaryResidencePayload(payload: any): string | null {
   const residenceData = payload.residence || payload;
 
-  // Required fields
-  const requiredFields = ["nhanKhauId", "tuNgay", "diaChi", "lyDo"];
+  // Required fields: nếu không có nhanKhauId thì phải có person (thêm mới)
+  const requiredFields = ["tuNgay", "denNgay", "diaChi", "lyDo"];
   const missingFields = requiredFields.filter((field) => !residenceData[field]);
   if (missingFields.length > 0) {
     return `Thiếu các trường bắt buộc: ${missingFields.join(", ")}`;
   }
 
-  // Validate nhanKhauId exists
-  const nhanKhauId = residenceData.nhanKhauId;
-  if (!Number.isInteger(nhanKhauId) || nhanKhauId <= 0) {
-    return "nhanKhauId phải là số nguyên dương";
+  // Nếu không gửi nhanKhauId, yêu cầu thông tin person như thêm nhân khẩu
+  if (!residenceData.nhanKhauId) {
+    const person = residenceData.person || {};
+    const personRequired = ["hoTen", "ngaySinh", "gioiTinh", "noiSinh"];
+    const missingPerson = personRequired.filter((f) => !person[f]);
+    if (missingPerson.length > 0) {
+      return `Thiếu thông tin nhân khẩu tạm trú: ${missingPerson.join(", ")}`;
+    }
+    if (person.gioiTinh && !["nam", "nu", "khac"].includes(person.gioiTinh)) {
+      return "Giới tính phải là 'nam', 'nu', hoặc 'khac'";
+    }
+  } else {
+    // Validate nhanKhauId nếu có
+    const nhanKhauId = residenceData.nhanKhauId;
+    if (!Number.isInteger(nhanKhauId) || nhanKhauId <= 0) {
+      return "nhanKhauId phải là số nguyên dương";
+    }
   }
 
-  // Validate dates
+  // Validate dates (cả tuNgay và denNgay bắt buộc)
   const tuNgay = new Date(residenceData.tuNgay);
   if (isNaN(tuNgay.getTime())) {
     return "tuNgay phải là ngày hợp lệ";
   }
 
-  if (residenceData.denNgay) {
-    const denNgay = new Date(residenceData.denNgay);
-    if (isNaN(denNgay.getTime())) {
-      return "denNgay phải là ngày hợp lệ";
-    }
-    if (tuNgay >= denNgay) {
-      return "tuNgay phải nhỏ hơn denNgay";
-    }
+  const denNgay = new Date(residenceData.denNgay);
+  if (isNaN(denNgay.getTime())) {
+    return "denNgay phải là ngày hợp lệ";
+  }
+  if (tuNgay >= denNgay) {
+    return "tuNgay phải nhỏ hơn denNgay";
   }
 
   // Validate lyDo is not empty
-  if (residenceData.lyDo.trim().length === 0) {
+  if (String(residenceData.lyDo || "").trim().length === 0) {
     return "lyDo không được để trống";
   }
 
   // Validate diaChi is not empty
-  if (residenceData.diaChi.trim().length === 0) {
+  if (String(residenceData.diaChi || "").trim().length === 0) {
     return "diaChi không được để trống";
   }
 
@@ -1984,77 +2082,185 @@ async function processAddPersonApproval(
 async function processTemporaryResidenceApproval(
   requestId: number,
   payload: any,
-  reviewerId: number
+  reviewerId: number,
+  targetHouseholdId?: number,
+  targetPersonId?: number
 ) {
   // Start transaction
   await query("BEGIN");
 
   try {
+    // Lấy requesterUserId để lưu vào tam_tru_vang (đúng người gửi)
+    const reqInfo = await query(
+      `SELECT "requesterUserId" FROM requests WHERE id = $1`,
+      [requestId]
+    );
+    const requesterUserId = reqInfo.rows?.[0]?.requesterUserId || null;
+
     const residenceData = payload.residence || payload;
     const { nhanKhauId, tuNgay, denNgay, diaChi, lyDo } = residenceData;
+    const person = residenceData.person || null;
 
-    // 1. Check nhan_khau exists
-    const nhanKhauCheck = await query(
-      `SELECT id, "hoTen", "trangThai" FROM nhan_khau WHERE id = $1`,
-      [nhanKhauId]
-    );
-
-    if ((nhanKhauCheck?.rowCount ?? 0) === 0) {
-      throw { code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
-    }
-
-    const nhanKhau = nhanKhauCheck.rows[0];
-
-    // 2. Check if person is already in tam_tru_vang status
-    if (nhanKhau.trangThai === "tam_tru" || nhanKhau.trangThai === "tam_vang") {
+    // Nếu chưa có nhanKhauId, phải có householdId để thêm mới
+    if (!residenceData.nhanKhauId && !residenceData.householdId && !residenceData.targetHouseholdId && !residenceData.hoKhauId) {
       throw {
-        code: "PERSON_ALREADY_IN_TEMP_STATUS",
-        message: "Nhân khẩu đã đang trong trạng thái tạm trú hoặc tạm vắng",
+        code: "HOUSEHOLD_REQUIRED",
+        message: "Thiếu thông tin hộ khẩu để thêm nhân khẩu tạm trú",
       };
     }
 
-    // 3. Check if there's already an active tam_tru_vang record for this person
-    const existingCheck = await query(
-      `SELECT id FROM tam_tru_vang
-       WHERE "nhanKhauId" = $1 AND "trangThai" IN ('cho_duyet', 'da_duyet', 'dang_thuc_hien')
-       AND (denNgay IS NULL OR denNgay >= CURRENT_DATE)`,
-      [nhanKhauId]
-    );
+    // Xác định householdId (ưu tiên targetHouseholdId từ request)
+    const householdId =
+      targetHouseholdId ||
+      residenceData.targetHouseholdId ||
+      residenceData.householdId ||
+      residenceData.hoKhauId ||
+      null;
 
-    if ((existingCheck?.rowCount ?? 0) > 0) {
-      throw {
-        code: "ACTIVE_TEMP_RECORD_EXISTS",
-        message:
-          "Đã tồn tại bản ghi tạm trú/vắng đang hoạt động cho nhân khẩu này",
-      };
+    let finalNhanKhauId = nhanKhauId;
+
+    // Nếu đã có nhanKhauId: kiểm tra và chặn trùng
+    if (finalNhanKhauId) {
+      const nhanKhauCheck = await query(
+        `SELECT id, "hoTen", "trangThai" FROM nhan_khau WHERE id = $1`,
+        [finalNhanKhauId]
+      );
+
+      if ((nhanKhauCheck?.rowCount ?? 0) === 0) {
+        throw { code: "PERSON_NOT_FOUND", message: "Nhân khẩu không tồn tại" };
+      }
+
+      const nhanKhau = nhanKhauCheck.rows[0];
+
+      if (nhanKhau.trangThai === "tam_tru" || nhanKhau.trangThai === "tam_vang") {
+        throw {
+          code: "PERSON_ALREADY_IN_TEMP_STATUS",
+          message: "Nhân khẩu đã đang trong trạng thái tạm trú hoặc tạm vắng",
+        };
+      }
+
+      const existingCheck = await query(
+        `SELECT id FROM tam_tru_vang
+         WHERE "nhanKhauId" = $1 AND "trangThai" IN ('cho_duyet', 'da_duyet', 'dang_thuc_hien')
+         AND (denNgay IS NULL OR denNgay >= CURRENT_DATE)`,
+        [finalNhanKhauId]
+      );
+
+      if ((existingCheck?.rowCount ?? 0) > 0) {
+        throw {
+          code: "ACTIVE_TEMP_RECORD_EXISTS",
+          message: "Đã tồn tại bản ghi tạm trú/vắng đang hoạt động cho nhân khẩu này",
+        };
+      }
+    } else {
+      // Thêm nhân khẩu mới cho hộ khẩu
+      const personData = person || residenceData.person || {};
+      const processedQuanHe = personData.quanHe || "khac";
+
+      // 1. Check household exists and active
+      const householdCheck = await query(
+        `SELECT id, "trangThai" FROM ho_khau WHERE id = $1`,
+        [householdId]
+      );
+      if ((householdCheck?.rowCount ?? 0) === 0) {
+        throw { code: "HOUSEHOLD_NOT_FOUND", message: "Hộ khẩu không tồn tại" };
+      }
+      if (householdCheck.rows[0].trangThai !== "active") {
+        throw {
+          code: "HOUSEHOLD_INACTIVE",
+          message: "Hộ khẩu chưa được kích hoạt",
+        };
+      }
+
+      // 2. Validate CCCD uniqueness
+      if (personData.cccd && personData.cccd.trim() !== "") {
+        const cccdCheck = await query(`SELECT id FROM nhan_khau WHERE cccd = $1`, [
+          personData.cccd.trim(),
+        ]);
+        if ((cccdCheck?.rowCount ?? 0) > 0) {
+          throw { code: "DUPLICATE_CCCD", message: "Số CCCD đã tồn tại trong hệ thống" };
+        }
+      }
+
+      // 3. Duplicate check same name + dob + household
+      const duplicateCheck = await query(
+        `SELECT id FROM nhan_khau WHERE "hoKhauId" = $1 AND "hoTen" = $2 AND "ngaySinh" = $3`,
+        [householdId, personData.hoTen.trim(), personData.ngaySinh]
+      );
+      if ((duplicateCheck?.rowCount ?? 0) > 0) {
+        throw {
+          code: "DUPLICATE_PERSON",
+          message: "Người này đã tồn tại trong hộ khẩu",
+        };
+      }
+
+      // 4. Insert nhan_khau ở trạng thái tạm trú
+      const createdPerson = await query(
+        `INSERT INTO nhan_khau (
+          "hoTen", "biDanh", cccd, "ngayCapCCCD", "noiCapCCCD",
+          "ngaySinh", "gioiTinh", "noiSinh", "nguyenQuan", "danToc", "tonGiao", "quocTich",
+          "hoKhauId", "quanHe", "ngayDangKyThuongTru", "diaChiThuongTruTruoc",
+          "ngheNghiep", "noiLamViec", "ghiChu", "trangThai"
+        ) VALUES (
+          $1, $2, $3, $4, $5,
+          $6, $7, $8, $9, $10, $11, $12,
+          $13, $14, $15, $16,
+          $17, $18, $19, 'tam_tru'
+        ) RETURNING id`,
+        [
+          personData.hoTen.trim(),
+          personData.biDanh || null,
+          personData.cccd?.trim() || null,
+          personData.ngayCapCCCD || null,
+          personData.noiCapCCCD || null,
+          personData.ngaySinh,
+          personData.gioiTinh,
+          personData.noiSinh,
+          personData.nguyenQuan || null,
+          personData.danToc || null,
+          personData.tonGiao || null,
+          personData.quocTich || "Việt Nam",
+          householdId,
+          processedQuanHe,
+          personData.ngayDangKyThuongTru || null,
+          personData.diaChiThuongTruTruoc || null,
+          personData.ngheNghiep || null,
+          personData.noiLamViec || null,
+          personData.ghiChu || residenceData.ghiChu || "Tạm trú",
+        ]
+      );
+
+      finalNhanKhauId = createdPerson.rows[0].id;
     }
 
-    // 4. Insert new tam_tru_vang record
-    const insertResult = await query(
+    // Ghi tam_tru_vang
+    await query(
       `INSERT INTO tam_tru_vang (
         "nhanKhauId", loai, "tuNgay", "denNgay", "diaChi", "lyDo",
         "nguoiDangKy", "nguoiDuyet", "trangThai"
       ) VALUES (
         $1, 'tam_tru', $2, $3, $4, $5,
         $6, $7, 'da_duyet'
-      ) RETURNING *`,
+      )`,
       [
-        nhanKhauId,
+        finalNhanKhauId,
         tuNgay,
         denNgay || null,
-        diaChi.trim(),
-        lyDo.trim(),
-        reviewerId, // nguoiDangKy - actually the reviewer who approved the request
-        reviewerId, // nguoiDuyet
+        String(diaChi).trim(),
+        String(lyDo || residenceData.ghiChu || "Tạm trú").trim(),
+        requesterUserId || reviewerId,
+        reviewerId,
       ]
     );
 
-    // 5. Update nhan_khau status to tam_tru
+    // Cập nhật trạng thái nhân khẩu
     await query(`UPDATE nhan_khau SET "trangThai" = 'tam_tru' WHERE id = $1`, [
-      nhanKhauId,
+      finalNhanKhauId,
     ]);
 
     await query("COMMIT");
+
+    return { id: finalNhanKhauId };
   } catch (err) {
     await query("ROLLBACK");
     throw err;

@@ -316,18 +316,6 @@ router.post(
 
       const headHouseholdId = Number(headInfo.rows[0].hoKhauId);
 
-      // Validate required fields
-      if (!loai || !nhanKhauId || !tuNgay || !diaChi || !lyDo) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: "VALIDATION_ERROR",
-            message:
-              "Thiếu thông tin bắt buộc: loai, nhanKhauId, tuNgay, diaChi, lyDo",
-          },
-        });
-      }
-
       // Validate loai
       if (!["tam_tru", "tam_vang"].includes(loai)) {
         return res.status(400).json({
@@ -339,36 +327,124 @@ router.post(
         });
       }
 
-      // Check if nhanKhauId belongs to user's household
-      const nhanKhauCheck = await query(
-        `SELECT nk.id, nk."hoKhauId", hk."chuHoId"
-       FROM nhan_khau nk
-       JOIN ho_khau hk ON nk."hoKhauId" = hk.id
-       WHERE nk.id = $1`,
-        [nhanKhauId]
-      );
-
-      if (nhanKhauCheck.rowCount === 0) {
-        return res.status(404).json({
+      // For both types, require tuNgay + diaChi + lyDo
+      if (!tuNgay || !diaChi || !lyDo) {
+        return res.status(400).json({
           success: false,
           error: {
-            code: "NOT_FOUND",
-            message: "Nhân khẩu không tồn tại",
+            code: "VALIDATION_ERROR",
+            message: "Thiếu thông tin bắt buộc: tuNgay, diaChi, lyDo",
           },
         });
       }
 
-      const nhanKhau = nhanKhauCheck.rows[0];
-
-      if (Number(nhanKhau.hoKhauId) !== headHouseholdId) {
-        return res.status(403).json({
+      // Validate date range when provided
+      const parsedTuNgay = new Date(tuNgay);
+      const parsedDenNgay = denNgay ? new Date(denNgay) : null;
+      if (isNaN(parsedTuNgay.getTime())) {
+        return res.status(400).json({
+          success: false,
+          error: { code: "VALIDATION_ERROR", message: "tuNgay không hợp lệ" },
+        });
+      }
+      if (parsedDenNgay && isNaN(parsedDenNgay.getTime())) {
+        return res.status(400).json({
+          success: false,
+          error: { code: "VALIDATION_ERROR", message: "denNgay không hợp lệ" },
+        });
+      }
+      if (parsedDenNgay && parsedTuNgay >= parsedDenNgay) {
+        return res.status(400).json({
           success: false,
           error: {
-            code: "FORBIDDEN",
-            message:
-              "Bạn chỉ có thể tạo yêu cầu cho nhân khẩu trong hộ khẩu của mình",
+            code: "VALIDATION_ERROR",
+            message: "tuNgay phải nhỏ hơn denNgay",
           },
         });
+      }
+
+      // New flow: cho phép thêm nhân khẩu mới cho tạm trú
+      const personInput = req.body.person || null;
+      let finalNhanKhauId = nhanKhauId ? Number(nhanKhauId) : null;
+
+      if (!finalNhanKhauId && loai === "tam_vang") {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Tạm vắng yêu cầu chọn nhân khẩu hiện có",
+          },
+        });
+      }
+
+      if (!finalNhanKhauId && loai === "tam_tru") {
+        // Validate minimal person fields
+        const requiredPerson = [
+          "hoTen",
+          "ngaySinh",
+          "gioiTinh",
+          "noiSinh",
+          "quanHe",
+        ];
+        const missingPerson = requiredPerson.filter(
+          (f) => !personInput || !personInput[f]
+        );
+        if (missingPerson.length > 0) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: `Thiếu thông tin nhân khẩu tạm trú: ${missingPerson.join(", ")}`,
+            },
+          });
+        }
+
+        if (
+          personInput.gioiTinh &&
+          !["nam", "nu", "khac"].includes(personInput.gioiTinh)
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: {
+              code: "VALIDATION_ERROR",
+              message: "Giới tính phải là 'nam', 'nu' hoặc 'khac'",
+            },
+          });
+        }
+      }
+
+      // If existing nhanKhauId provided, ensure belongs to household
+      if (finalNhanKhauId) {
+        const nhanKhauCheck = await query(
+          `SELECT nk.id, nk."hoKhauId", hk."chuHoId"
+         FROM nhan_khau nk
+         JOIN ho_khau hk ON nk."hoKhauId" = hk.id
+         WHERE nk.id = $1`,
+          [finalNhanKhauId]
+        );
+
+        if (nhanKhauCheck.rowCount === 0) {
+          return res.status(404).json({
+            success: false,
+            error: {
+              code: "NOT_FOUND",
+              message: "Nhân khẩu không tồn tại",
+            },
+          });
+        }
+
+        const nhanKhau = nhanKhauCheck.rows[0];
+
+        if (Number(nhanKhau.hoKhauId) !== headHouseholdId) {
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: "FORBIDDEN",
+              message:
+                "Bạn chỉ có thể tạo yêu cầu cho nhân khẩu trong hộ khẩu của mình",
+            },
+          });
+        }
       }
 
       // Process uploaded files
@@ -389,6 +465,67 @@ router.post(
         }
       }
 
+      await query("BEGIN");
+
+      // Nếu là tạm trú và chưa có nhanKhauId, tạo nhân khẩu mới ở trạng thái tạm trú
+      if (!finalNhanKhauId && loai === "tam_tru") {
+        // Uniqueness check cho CCCD nếu có
+        if (personInput.cccd && personInput.cccd.trim() !== "") {
+          const cccdCheck = await query(
+            `SELECT id FROM nhan_khau WHERE cccd = $1`,
+            [personInput.cccd.trim()]
+          );
+          if ((cccdCheck?.rowCount ?? 0) > 0) {
+            await query("ROLLBACK");
+            return res.status(409).json({
+              success: false,
+              error: {
+                code: "DUPLICATE_CCCD",
+                message: "CCCD đã tồn tại trong hệ thống",
+              },
+            });
+          }
+        }
+
+        const quanHe = personInput.quanHe || "khac";
+        const insertPerson = await query(
+          `INSERT INTO nhan_khau (
+            "hoTen", "biDanh", cccd, "ngayCapCCCD", "noiCapCCCD",
+            "ngaySinh", "gioiTinh", "noiSinh", "nguyenQuan", "danToc", "tonGiao", "quocTich",
+            "hoKhauId", "quanHe", "ngayDangKyThuongTru", "diaChiThuongTruTruoc",
+            "ngheNghiep", "noiLamViec", "ghiChu", "trangThai"
+          ) VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8, $9, $10, $11, $12,
+            $13, $14, $15, $16,
+            $17, $18, $19, 'tam_tru'
+          ) RETURNING id`,
+          [
+            personInput.hoTen.trim(),
+            personInput.biDanh || null,
+            personInput.cccd?.trim() || null,
+            personInput.ngayCapCCCD || null,
+            personInput.noiCapCCCD || null,
+            personInput.ngaySinh,
+            personInput.gioiTinh,
+            personInput.noiSinh,
+            personInput.nguyenQuan || null,
+            personInput.danToc || null,
+            personInput.tonGiao || null,
+            personInput.quocTich || "Việt Nam",
+            headHouseholdId,
+            quanHe,
+            personInput.ngayDangKyThuongTru || null,
+            personInput.diaChiThuongTruTruoc || null,
+            personInput.ngheNghiep || null,
+            personInput.noiLamViec || null,
+            personInput.ghiChu || lyDo || "Tạm trú",
+          ]
+        );
+
+        finalNhanKhauId = insertPerson.rows[0].id;
+      }
+
       // Insert into tam_tru_vang table
       const insertResult = await query(
         `INSERT INTO tam_tru_vang (
@@ -397,7 +534,7 @@ router.post(
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'cho_duyet')
       RETURNING id`,
         [
-          nhanKhauId,
+          finalNhanKhauId,
           loai,
           tuNgay,
           denNgay || null,
@@ -413,8 +550,8 @@ router.post(
       // Also create a request record for tracking
       const requestType =
         loai === "tam_tru" ? "TEMPORARY_RESIDENCE" : "TEMPORARY_ABSENCE";
-      const payload = {
-        nhanKhauId: parseInt(nhanKhauId),
+      const payload: any = {
+        nhanKhauId: finalNhanKhauId,
         tuNgay,
         denNgay: denNgay || null,
         diaChi,
@@ -422,11 +559,17 @@ router.post(
         attachments,
       };
 
+      if (personInput) {
+        payload.person = personInput;
+      }
+
       await query(
         `INSERT INTO requests ("requesterUserId", type, "targetPersonId", payload, status)
        VALUES ($1, $2, $3, $4, 'PENDING')`,
-        [userId, requestType, nhanKhauId, JSON.stringify(payload)]
+        [userId, requestType, finalNhanKhauId, JSON.stringify(payload)]
       );
+
+      await query("COMMIT");
 
       return res.status(201).json({
         success: true,
@@ -436,6 +579,8 @@ router.post(
         },
       });
     } catch (err: any) {
+      await query("ROLLBACK");
+
       // If error occurs and files were uploaded, clean them up
       if (req.files && Array.isArray(req.files)) {
         for (const file of req.files as Express.Multer.File[]) {

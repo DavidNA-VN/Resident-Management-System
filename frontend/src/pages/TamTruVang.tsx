@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiService, API_BASE_URL } from "../services/api";
-import RequestDetailModal from "../components/RequestDetailModal";
+import TamTruVangDetailModal from "../components/TamTruVangDetailModal";
 
 interface RequestItem {
   id: number;
@@ -26,6 +26,7 @@ const requestTypeLabels: Record<string, string> = {
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
   SUA_NHAN_KHAU: "Sửa thông tin nhân khẩu",
   XOA_NHAN_KHAU: "Xoá nhân khẩu",
+  TEMP: "", // fallback
 };
 
 const statusLabels: Record<string, string> = {
@@ -96,6 +97,9 @@ export default function TamTruVang() {
   const [filteredRequests, setFilteredRequests] = useState<RequestItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [fromDateFilter, setFromDateFilter] = useState<string>("");
+  const [toDateFilter, setToDateFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(
     null
@@ -111,6 +115,13 @@ export default function TamTruVang() {
     { value: "all", label: "Tất cả" },
     { value: "TAM_TRU", label: "Tạm trú" },
     { value: "TAM_VANG", label: "Tạm vắng" },
+  ];
+
+  const statusOptions = [
+    { value: "all", label: "Tất cả" },
+    { value: "PENDING", label: "Chờ duyệt" },
+    { value: "APPROVED", label: "Đã duyệt" },
+    { value: "REJECTED", label: "Từ chối" },
   ];
 
   // Check user role
@@ -138,33 +149,22 @@ export default function TamTruVang() {
 
   useEffect(() => {
     loadRequests();
-  }, [typeFilter, searchQuery]);
+  }, [typeFilter, statusFilter, fromDateFilter, toDateFilter, searchQuery]);
 
   const applyFilters = (data: RequestItem[]) => {
-    const now = new Date();
-    const activeRecords = data
-      .filter((item) => isTamTruVangType(item.type))
-      .map((item) => {
-        const tuNgay = getDateFromPayload(item, "tuNgay");
-        const denNgay = getDateFromPayload(item, "denNgay");
-        return {
-          ...item,
-          payload: { ...(item.payload || {}), tuNgay, denNgay },
-        } as RequestItem;
-      })
-      .filter((item) => {
-        if (normalizeStatus(item.status) !== "APPROVED") return false;
-        const startDate = parseYMDToDate(getDateFromPayload(item, "tuNgay"));
-        const endDate = parseYMDToDate(getDateFromPayload(item, "denNgay"));
-        if (startDate && startDate > now) return false;
-        if (endDate && endDate < now) return false;
-        return true;
-      });
+    const withNormalizedDates = data.map((item) => {
+      const tuNgay = getDateFromPayload(item, "tuNgay");
+      const denNgay = getDateFromPayload(item, "denNgay");
+      return {
+        ...item,
+        payload: { ...(item.payload || {}), tuNgay, denNgay },
+      } as RequestItem;
+    });
 
     const byType =
       typeFilter === "all"
-        ? activeRecords
-        : activeRecords.filter((item) => {
+        ? withNormalizedDates
+        : withNormalizedDates.filter((item) => {
             const normalized = normalizeType(item.type);
             if (typeFilter === "TAM_TRU") {
               return (
@@ -179,9 +179,29 @@ export default function TamTruVang() {
             return normalized === normalizeType(typeFilter);
           });
 
-    if (!searchQuery.trim()) return byType;
+    const byStatus =
+      statusFilter === "all"
+        ? byType
+        : byType.filter(
+            (item) => normalizeStatus(item.status) === normalizeStatus(statusFilter)
+          );
+
+    const byDate = byStatus.filter((item) => {
+      if (!fromDateFilter && !toDateFilter) return true;
+      const created = item.createdAt ? new Date(item.createdAt) : null;
+      if (!created) return false;
+      if (fromDateFilter && created < new Date(fromDateFilter)) return false;
+      if (toDateFilter) {
+        const to = new Date(toDateFilter);
+        to.setHours(23, 59, 59, 999);
+        if (created > to) return false;
+      }
+      return true;
+    });
+
+    if (!searchQuery.trim()) return byDate;
     const keyword = searchQuery.trim().toLowerCase();
-    return byType.filter((item) => {
+    return byDate.filter((item) => {
       const name = item.nguoiGui?.hoTen?.toLowerCase() || "";
       const username = item.nguoiGui?.username?.toLowerCase() || "";
       const cccd = item.nguoiGui?.cccd?.toLowerCase() || "";
@@ -217,6 +237,9 @@ export default function TamTruVang() {
           "[TamTruVang] calling getTamTruVangRequests with",
           {
             type: typeFilter !== "all" ? typeFilter : undefined,
+            status: statusFilter !== "all" ? statusFilter : undefined,
+            fromDate: fromDateFilter || undefined,
+            toDate: toDateFilter || undefined,
             keyword: searchQuery || undefined,
           },
           "tokenExists=",
@@ -225,12 +248,18 @@ export default function TamTruVang() {
       } catch (e) {}
       const paramsForLog: any = {
         type: typeFilter !== "all" ? typeFilter : undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+        fromDate: fromDateFilter || undefined,
+        toDate: toDateFilter || undefined,
         keyword: searchQuery || undefined,
         page: 1,
         limit: 200,
       };
       const qp = new URLSearchParams();
       if (paramsForLog.type) qp.append("type", paramsForLog.type);
+      if (paramsForLog.status) qp.append("status", paramsForLog.status);
+      if (paramsForLog.fromDate) qp.append("fromDate", paramsForLog.fromDate);
+      if (paramsForLog.toDate) qp.append("toDate", paramsForLog.toDate);
       if (paramsForLog.keyword) qp.append("keyword", paramsForLog.keyword);
       qp.append("page", String(paramsForLog.page));
       qp.append("limit", String(paramsForLog.limit));
@@ -266,12 +295,18 @@ export default function TamTruVang() {
       try {
         const paramsForLog2: any = {
           type: typeFilter !== "all" ? typeFilter : undefined,
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          fromDate: fromDateFilter || undefined,
+          toDate: toDateFilter || undefined,
           keyword: searchQuery || undefined,
           page: 1,
           limit: 200,
         };
         const qp2 = new URLSearchParams();
         if (paramsForLog2.type) qp2.append("type", paramsForLog2.type);
+        if (paramsForLog2.status) qp2.append("status", paramsForLog2.status);
+        if (paramsForLog2.fromDate) qp2.append("fromDate", paramsForLog2.fromDate);
+        if (paramsForLog2.toDate) qp2.append("toDate", paramsForLog2.toDate);
         if (paramsForLog2.keyword) qp2.append("keyword", paramsForLog2.keyword);
         qp2.append("page", String(paramsForLog2.page));
         qp2.append("limit", String(paramsForLog2.limit));
@@ -356,10 +391,6 @@ export default function TamTruVang() {
 
   return (
     <div className="space-y-6">
-      {/* DEBUG banner to verify this component is rendered */}
-      <div className="rounded-md bg-red-50 border border-red-200 p-3 text-red-700 font-semibold">
-        DEBUG: TamTruVang component loaded (v2)
-      </div>
       {/* Toast */}
       {toast && (
         <div className="pointer-events-none fixed inset-x-0 top-4 z-[200] flex justify-center px-4">
@@ -388,10 +419,10 @@ export default function TamTruVang() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
-            Danh sách tạm trú / tạm vắng đang hiệu lực
+            Duyệt Tạm trú / Tạm vắng
           </h1>
           <p className="mt-1 text-gray-600">
-            Chỉ hiển thị các hồ sơ đã duyệt và còn trong thời gian hiệu lực
+            Danh sách đơn do người dân gửi, cán bộ có thể duyệt hoặc từ chối.
           </p>
         </div>
         <button
@@ -404,10 +435,10 @@ export default function TamTruVang() {
 
       {/* Filter Card */}
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="md:col-span-1">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Loại yêu cầu
+              Loại
             </label>
             <select
               value={typeFilter}
@@ -421,15 +452,57 @@ export default function TamTruVang() {
               ))}
             </select>
           </div>
+
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Trạng thái
+            </label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            >
+              {statusOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Từ ngày
+            </label>
+            <input
+              type="date"
+              value={fromDateFilter}
+              onChange={(e) => setFromDateFilter(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Đến ngày
+            </label>
+            <input
+              type="date"
+              value={toDateFilter}
+              onChange={(e) => setToDateFilter(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+          </div>
+
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Tìm kiếm
+              Tìm kiếm (tên, CCCD, sổ hộ khẩu, địa chỉ)
             </label>
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Họ tên, CCCD, sổ hộ khẩu hoặc địa chỉ..."
+              placeholder="Nhập từ khóa..."
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
@@ -454,7 +527,7 @@ export default function TamTruVang() {
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-200 p-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            Đang tạm trú / tạm vắng ({filteredRequests.length})
+            Danh sách đơn ({filteredRequests.length})
           </h2>
         </div>
 
@@ -492,6 +565,9 @@ export default function TamTruVang() {
                     CCCD
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    Địa chỉ
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Thời gian hiệu lực
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
@@ -509,7 +585,18 @@ export default function TamTruVang() {
                       #{request.id}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {requestTypeLabels[request.type] || request.type}
+                      <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-800">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            normalizeType(request.type).includes("VANG")
+                              ? "bg-amber-500"
+                              : "bg-emerald-500"
+                          }`}
+                        />
+                        {requestTypeLabels[normalizeType(request.type)] ||
+                          requestTypeLabels[request.type] ||
+                          request.type}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {request.nguoiGui?.hoTen ||
@@ -518,6 +605,9 @@ export default function TamTruVang() {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {request.nguoiGui?.cccd || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {request.payload?.diaChi || "-"}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {formatDateRange(
@@ -554,7 +644,7 @@ export default function TamTruVang() {
 
       {/* Detail Modal */}
       {selectedRequestId && (
-        <RequestDetailModal
+        <TamTruVangDetailModal
           requestId={selectedRequestId}
           isOpen={true}
           onClose={handleCloseModal}

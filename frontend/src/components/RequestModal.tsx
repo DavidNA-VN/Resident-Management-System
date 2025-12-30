@@ -40,13 +40,32 @@ export default function RequestModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const defaultDiaChi = (() => {
+    if (!householdInfo) return "";
+    const soHoKhau = householdInfo.soHoKhau || "";
+    const diaChi = householdInfo.diaChi || "";
+    return `${soHoKhau}${soHoKhau && diaChi ? " " : ""}${diaChi}`.trim();
+  })();
+
   useEffect(() => {
     if (isOpen && type) {
       // Reset form khi mở modal
-      setFormData({});
+      if (type === "TAM_TRU") {
+        setFormData({ lyDo: "Tạm trú", ghiChu: "Tạm trú", diaChi: defaultDiaChi });
+      } else {
+        setFormData({});
+      }
       setError(null);
     }
-  }, [isOpen, type]);
+  }, [isOpen, type, defaultDiaChi]);
+
+  // Khi thông tin hộ khẩu cập nhật sau khi mở modal, tự điền địa chỉ mặc định nếu chưa có
+  useEffect(() => {
+    if (!isOpen || type !== "TAM_TRU") return;
+    if (!formData?.diaChi && defaultDiaChi) {
+      setFormData((prev: any) => ({ ...prev, diaChi: defaultDiaChi }));
+    }
+  }, [defaultDiaChi, isOpen, type, formData?.diaChi]);
 
   // Accessibility: focus modal container when opened
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -64,23 +83,27 @@ export default function RequestModal({
   };
 
   const handleSubmit = async (e: FormEvent) => {
+              {householdInfo && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Hộ khẩu <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={`${householdInfo.soHoKhau || ""}${householdInfo.diaChi ? " - " + householdInfo.diaChi : ""}`}
+                    readOnly
+                    className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm text-gray-700"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Địa chỉ tạm trú sẽ mặc định dùng hộ khẩu này; bạn vẫn có thể chỉnh sửa ô bên dưới nếu cần.
+                  </p>
+                </div>
+              )}
+
     e.preventDefault();
     setError(null);
 
     // Validate
-    if (
-      type === "TAM_VANG" ||
-      type === "TAM_TRU" ||
-      type === "SUA_NHAN_KHAU" ||
-      type === "XOA_NHAN_KHAU" ||
-      type === "DECEASED"
-    ) {
-      if (!formData.nhanKhauId) {
-        setError("Vui lòng chọn nhân khẩu");
-        return;
-      }
-    }
-
     if (type === "DECEASED") {
       if (!formData.ngayMat) {
         setError("Vui lòng nhập ngày mất");
@@ -92,22 +115,70 @@ export default function RequestModal({
       }
     }
 
-    if (type === "TAM_VANG" || type === "TAM_TRU") {
+    if (type === "TAM_VANG") {
+      if (!formData.nhanKhauId) {
+        setError("Vui lòng chọn nhân khẩu");
+        return;
+      }
       if (!formData.tuNgay) {
         setError("Vui lòng chọn từ ngày");
         return;
       }
-    }
-
-    if (
-      type === "TAM_VANG" ||
-      type === "TAM_TRU" ||
-      type === "SUA_NHAN_KHAU" ||
-      type === "XOA_NHAN_KHAU"
-    ) {
       if (!formData.lyDo || formData.lyDo.trim() === "") {
         setError("Vui lòng nhập lý do");
         return;
+      }
+    }
+
+    if (type === "TAM_TRU") {
+      const requiredFields = [
+        "hoTen",
+        "ngaySinh",
+        "gioiTinh",
+        "noiSinh",
+        "quanHe",
+        "tuNgay",
+      ];
+      const missing = requiredFields.filter((f) => !formData[f]);
+      if (missing.length > 0) {
+        setError(`Vui lòng nhập: ${missing.join(", ")}`);
+        return;
+      }
+      if (!formData.lyDo || formData.lyDo.trim() === "") {
+        setError("Vui lòng nhập ghi chú/Lý do tạm trú");
+        return;
+      }
+    }
+
+    // Chuẩn hóa payload theo loại
+    let payloadToSend: any = formData;
+    if (type === "TAM_TRU") {
+      const diaChiToUse = formData.diaChi || defaultDiaChi;
+
+      payloadToSend = {
+        person: {
+          hoTen: formData.hoTen,
+          cccd: formData.cccd || undefined,
+          ngaySinh: formData.ngaySinh,
+          gioiTinh: formData.gioiTinh,
+          noiSinh: formData.noiSinh,
+          quanHe: formData.quanHe,
+          ngheNghiep: formData.ngheNghiep || undefined,
+          ghiChu: formData.ghiChu || formData.lyDo || "Tạm trú",
+        },
+        tuNgay: formData.tuNgay,
+        denNgay: formData.denNgay,
+        diaChi: diaChiToUse,
+        lyDo: formData.lyDo || "Tạm trú",
+        ghiChu: formData.ghiChu || "Tạm trú",
+      };
+
+      // Đảm bảo không gửi nhanKhauId (tạo mới)
+      delete payloadToSend.nhanKhauId;
+
+      // Ghi lại địa chỉ mặc định vào formData để hiển thị (không chặn submit)
+      if (!formData.diaChi && diaChiToUse) {
+        setFormData((prev: any) => ({ ...prev, diaChi: diaChiToUse }));
       }
     }
 
@@ -115,7 +186,7 @@ export default function RequestModal({
     try {
       await onSubmit({
         type,
-        payload: formData,
+        payload: payloadToSend,
       });
       // Reset form sau khi submit thành công
       setFormData({});
@@ -251,49 +322,121 @@ export default function RequestModal({
             </>
           )}
 
-          {/* TAM_TRU */}
+          {/* TAM_TRU: tạo mới nhân khẩu + thời gian tạm trú */}
           {type === "TAM_TRU" && (
             <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Chọn nhân khẩu <span className="text-red-500">*</span>
-                </label>
-                <select
-                  autoFocus
-                  value={formData.nhanKhauId || ""}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      nhanKhauId: Number(e.target.value),
-                    })
-                  }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  required
-                >
-                  <option value="">-- Chọn nhân khẩu --</option>
-                  {nhanKhauList.map((nk) => (
-                    <option key={nk.id} value={nk.id}>
-                      {nk.hoTen}
-                    </option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Họ tên <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={formData.hoTen || ""}
+                    onChange={(e) => setFormData({ ...formData, hoTen: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Quan hệ với chủ hộ <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.quanHe || ""}
+                    onChange={(e) => setFormData({ ...formData, quanHe: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="">-- Chọn quan hệ --</option>
+                    <option value="chu_ho">Chủ hộ</option>
+                    <option value="vo_chong">Vợ/chồng</option>
+                    <option value="con">Con</option>
+                    <option value="cha_me">Cha/mẹ</option>
+                    <option value="anh_chi_em">Anh/chị/em</option>
+                    <option value="ong_ba">Ông/bà</option>
+                    <option value="chau">Cháu</option>
+                    <option value="khac">Khác</option>
+                  </select>
+                </div>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Ngày sinh <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.ngaySinh || ""}
+                    onChange={(e) => setFormData({ ...formData, ngaySinh: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Giới tính <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.gioiTinh || ""}
+                    onChange={(e) => setFormData({ ...formData, gioiTinh: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="">-- Chọn giới tính --</option>
+                    <option value="nam">Nam</option>
+                    <option value="nu">Nữ</option>
+                    <option value="khac">Khác</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nơi sinh <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.noiSinh || ""}
+                    onChange={(e) => setFormData({ ...formData, noiSinh: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">CCCD/CMND</label>
+                  <input
+                    type="text"
+                    value={formData.cccd || ""}
+                    onChange={(e) => setFormData({ ...formData, cccd: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    placeholder="Nhập CCCD (nếu có)"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Nghề nghiệp</label>
+                  <input
+                    type="text"
+                    value={formData.ngheNghiep || ""}
+                    onChange={(e) => setFormData({ ...formData, ngheNghiep: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    placeholder="Nhập nghề nghiệp (nếu có)"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Địa chỉ tạm trú <span className="text-red-500">*</span>
+                  Địa chỉ tạm trú
                 </label>
                 <input
                   type="text"
                   value={formData.diaChi || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, diaChi: e.target.value })
-                  }
+                  onChange={(e) => setFormData({ ...formData, diaChi: e.target.value })}
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="Nhập địa chỉ tạm trú..."
-                  required
+                  placeholder={defaultDiaChi ? `Mặc định: ${defaultDiaChi}` : "Nhập địa chỉ tạm trú..."}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Từ ngày <span className="text-red-500">*</span>
@@ -301,40 +444,33 @@ export default function RequestModal({
                   <input
                     type="date"
                     value={formData.tuNgay || ""}
-                    onChange={(e) =>
-                      setFormData({ ...formData, tuNgay: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, tuNgay: e.target.value })}
                     className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    required
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Đến ngày
+                    Đến ngày <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="date"
                     value={formData.denNgay || ""}
-                    onChange={(e) =>
-                      setFormData({ ...formData, denNgay: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, denNgay: e.target.value })}
                     className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
               </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Ghi chú/Lý do <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   value={formData.lyDo || ""}
-                  onChange={(e) =>
-                    setFormData({ ...formData, lyDo: e.target.value })
-                  }
+                  onChange={(e) => setFormData({ ...formData, lyDo: e.target.value })}
                   rows={4}
                   className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="Nhập lý do tạm trú..."
-                  required
+                  placeholder="Nhập lý do/ghi chú tạm trú..."
                 />
               </div>
             </>

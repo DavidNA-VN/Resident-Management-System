@@ -129,26 +129,31 @@ export default function TamTruVangDetailModal({ requestId, isOpen, onClose, onRe
                     </p>
                   </div>
                 </div>
-
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Người gửi</label>
                     <div className="text-sm text-gray-900">{requestDetail.requester?.fullName || "-"}</div>
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Người tạm trú/tạm vắng</label>
+                    <div className="text-sm text-gray-900">
+                      {requestDetail.person?.hoTen || requestDetail.nhanKhau?.hoTen || "-"}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {requestDetail.nhanKhau && (
+              {(requestDetail.nhanKhau || requestDetail.person) && (
                 <div className="border-t border-gray-200 pt-6">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Thông tin nhân khẩu</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Họ tên</label>
-                      <p className="text-sm text-gray-900">{requestDetail.nhanKhau.hoTen}</p>
+                      <p className="text-sm text-gray-900">{requestDetail.nhanKhau?.hoTen || requestDetail.person?.hoTen}</p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">CCCD</label>
-                      <p className="text-sm text-gray-900">{requestDetail.nhanKhau.cccd || "Chưa cập nhật"}</p>
+                      <p className="text-sm text-gray-900">{requestDetail.nhanKhau?.cccd || requestDetail.person?.cccd || "Chưa cập nhật"}</p>
                     </div>
                   </div>
                 </div>
@@ -159,23 +164,23 @@ export default function TamTruVangDetailModal({ requestId, isOpen, onClose, onRe
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Từ ngày</label>
-                    <p className="text-sm text-gray-900">{formatFromYMD(requestDetail.payload?.fromDate || requestDetail.tuNgay)}</p>
+                    <p className="text-sm text-gray-900">{formatFromYMD(requestDetail.payload?.tuNgay || requestDetail.tuNgay)}</p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Đến ngày</label>
-                    <p className="text-sm text-gray-900">{requestDetail.payload?.toDate ? formatFromYMD(requestDetail.payload.toDate) : (requestDetail.denNgay ? formatFromYMD(requestDetail.denNgay) : "Không xác định")}</p>
+                    <p className="text-sm text-gray-900">{requestDetail.payload?.denNgay ? formatFromYMD(requestDetail.payload.denNgay) : (requestDetail.denNgay ? formatFromYMD(requestDetail.denNgay) : "Không xác định")}</p>
                   </div>
                 </div>
                 <div className="mt-4">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ</label>
-                  <p className="text-sm text-gray-900">{requestDetail.payload?.address || requestDetail.diaChi || "-"}</p>
+                  <p className="text-sm text-gray-900">{requestDetail.payload?.diaChi || requestDetail.diaChi || "-"}</p>
                 </div>
               </div>
 
-              {requestDetail.payload?.reason && (
+              {(requestDetail.payload?.reason || requestDetail.payload?.lyDo || requestDetail.lyDo) && (
                 <div className="border-t border-gray-200 pt-6">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Lý do</h3>
-                  <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg">{requestDetail.payload.reason}</p>
+                  <p className="text-sm text-gray-900 bg-gray-50 p-3 rounded-lg">{requestDetail.payload?.reason || requestDetail.payload?.lyDo || requestDetail.lyDo}</p>
                 </div>
               )}
 

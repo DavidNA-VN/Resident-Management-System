@@ -804,7 +804,17 @@ class ApiService {
   // Citizen API for creating tam-tru-vang request with file upload
   async createTamTruVangRequest(data: {
     loai: "tam_tru" | "tam_vang";
-    nhanKhauId: number;
+    nhanKhauId?: number;
+    person?: {
+      hoTen: string;
+      cccd?: string;
+      ngaySinh: string;
+      gioiTinh: string;
+      noiSinh: string;
+      quanHe: string;
+      ngheNghiep?: string;
+      ghiChu?: string;
+    };
     tuNgay: string;
     denNgay?: string;
     diaChi: string;
@@ -813,7 +823,12 @@ class ApiService {
   }) {
     const formData = new FormData();
     formData.append("loai", data.loai);
-    formData.append("nhanKhauId", String(data.nhanKhauId));
+    if (data.loai === "tam_vang") {
+      formData.append("nhanKhauId", String(data.nhanKhauId));
+    }
+    if (data.loai === "tam_tru" && data.person) {
+      formData.append("person", JSON.stringify(data.person));
+    }
     formData.append("tuNgay", data.tuNgay);
     if (data.denNgay) formData.append("denNgay", data.denNgay);
     formData.append("diaChi", data.diaChi);
