@@ -257,7 +257,8 @@ export default function HoKhau() {
       if (typeof m === "object") {
         const name = m.hoTen || m.name;
         const id = m.id;
-        if (name && id !== undefined && id !== null) return `${name} (ID: ${id})`;
+        if (name && id !== undefined && id !== null)
+          return `${name} (ID: ${id})`;
         if (name) return String(name);
       }
       return formatScalar(m);
@@ -265,7 +266,11 @@ export default function HoKhau() {
 
     const formatAny = (v: any, keyHint?: string): string => {
       if (v === null || v === undefined) return "(trống)";
-      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+      if (
+        typeof v === "string" ||
+        typeof v === "number" ||
+        typeof v === "boolean"
+      ) {
         return formatScalar(v);
       }
       if (Array.isArray(v)) {
@@ -287,7 +292,8 @@ export default function HoKhau() {
         const entries: string[] = Object.entries(v as any)
           .slice(0, 6)
           .map(([k, vv]) => {
-            const label = (historyFieldLabels as Record<string, string>)[k] || k;
+            const label =
+              (historyFieldLabels as Record<string, string>)[k] || k;
             return `${label}: ${formatAny(vv, k)}`;
           });
         return entries.length ? entries.join("; ") : "(trống)";
@@ -335,18 +341,32 @@ export default function HoKhau() {
           if (f === "tach_ho") {
             const parts: string[] = [];
             if (obj.sourceSoHoKhau || obj.sourceHouseholdId) {
-              const so = obj.sourceSoHoKhau ? String(obj.sourceSoHoKhau) : "(không rõ)";
-              const id = obj.sourceHouseholdId !== undefined && obj.sourceHouseholdId !== null ? String(obj.sourceHouseholdId) : "(không rõ)";
+              const so = obj.sourceSoHoKhau
+                ? String(obj.sourceSoHoKhau)
+                : "(không rõ)";
+              const id =
+                obj.sourceHouseholdId !== undefined &&
+                obj.sourceHouseholdId !== null
+                  ? String(obj.sourceHouseholdId)
+                  : "(không rõ)";
               parts.push(`Từ hộ khẩu: ${so} (ID: ${id})`);
             }
             if (obj.movedToSoHoKhau || obj.movedToHouseholdId) {
-              const so = obj.movedToSoHoKhau ? String(obj.movedToSoHoKhau) : "(không rõ)";
-              const id = obj.movedToHouseholdId !== undefined && obj.movedToHouseholdId !== null ? String(obj.movedToHouseholdId) : "(không rõ)";
+              const so = obj.movedToSoHoKhau
+                ? String(obj.movedToSoHoKhau)
+                : "(không rõ)";
+              const id =
+                obj.movedToHouseholdId !== undefined &&
+                obj.movedToHouseholdId !== null
+                  ? String(obj.movedToHouseholdId)
+                  : "(không rõ)";
               parts.push(`Sang hộ khẩu: ${so} (ID: ${id})`);
             }
             if (Array.isArray(obj.members)) {
               const members = obj.members.map(formatMember).filter(Boolean);
-              parts.push(`Thành viên: ${members.length ? members.join(", ") : "(trống)"}`);
+              parts.push(
+                `Thành viên: ${members.length ? members.join(", ") : "(trống)"}`
+              );
             }
             return parts.length ? parts.join("; ") : "(trống)";
           }
@@ -371,7 +391,8 @@ export default function HoKhau() {
             const entries = orderedKeys
               .filter((k) => obj[k] !== undefined)
               .map((k) => {
-                const label = (historyFieldLabels as Record<string, string>)[k] || k;
+                const label =
+                  (historyFieldLabels as Record<string, string>)[k] || k;
                 return `${label}: ${formatAny(obj[k], k)}`;
               });
             return entries.length ? entries.join("; ") : "(trống)";
@@ -471,7 +492,9 @@ export default function HoKhau() {
                     const actionLabel = formatHistoryAction(h.hanhDong);
                     const truongKey = h?.truong ? String(h.truong) : "";
                     const fieldLabel = truongKey
-                      ? (historyFieldLabels as Record<string, string>)[truongKey] || truongKey
+                      ? (historyFieldLabels as Record<string, string>)[
+                          truongKey
+                        ] || truongKey
                       : actionLabel === "Tạo mới"
                       ? "(toàn bộ bản ghi)"
                       : "(không rõ)";
@@ -494,7 +517,9 @@ export default function HoKhau() {
                             </span>
                           </div>
                         </td>
-                        <td className="px-3 py-2">{h.nguoiThucHienName || "-"}</td>
+                        <td className="px-3 py-2">
+                          {h.nguoiThucHienName || "-"}
+                        </td>
                       </tr>
                     );
                   })}

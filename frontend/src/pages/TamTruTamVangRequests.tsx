@@ -350,8 +350,69 @@ export default function TamTruTamVangRequests() {
           normalized.map((r) => ({ id: r.id, loai: r.loai, status: r.status }))
         );
         const filtered = filterActive(normalized);
-        console.log("[TTTV] filtered count", filtered.length, filtered);
-        setRequests(filtered);
+
+        // Deduplicate: only show one row per related person (per tạm trú/tạm vắng)
+        const dedup = new Map<string, RequestRecord>();
+        const getLoaiKey = (r: RequestRecord) => resolveLoaiKey(r);
+        const getPersonKey = (r: RequestRecord) => {
+          const cccd =
+            (r as any).nhanKhau?.cccd ||
+            r.payload?.personCccd ||
+            r.payload?.cccd ||
+            r.payload?.nguoiLienQuan?.cccd ||
+            r.payload?.nguoiTamTruVang?.cccd ||
+            r.person?.cccd ||
+            "";
+          const soHoKhau = r.hoKhau?.soHoKhau || "";
+          const name =
+            r.nhanKhau?.hoTen ||
+            r.payload?.personName ||
+            r.payload?.hoTen ||
+            "";
+          return (cccd ? `cccd:${cccd}` : `name:${name}`) + `|hk:${soHoKhau}`;
+        };
+
+        const rankStatus = (s: string) => {
+          const v = (s || "").toLowerCase();
+          if (v.includes("pending") || v.includes("cho")) return 3;
+          if (
+            v.includes("approved") ||
+            v.includes("da_duyet") ||
+            v.includes("da duyet")
+          )
+            return 2;
+          if (
+            v.includes("rejected") ||
+            v.includes("tu_choi") ||
+            v.includes("tu choi")
+          )
+            return 1;
+          return 0;
+        };
+
+        for (const r of filtered) {
+          const key = `${getLoaiKey(r)}|${getPersonKey(r)}`;
+          const existing = dedup.get(key);
+          if (!existing) {
+            dedup.set(key, r);
+            continue;
+          }
+          const prefer =
+            rankStatus(r.status) > rankStatus(existing.status) ||
+            (rankStatus(r.status) === rankStatus(existing.status) &&
+              new Date(r.createdAt || 0).getTime() >
+                new Date(existing.createdAt || 0).getTime());
+          if (prefer) dedup.set(key, r);
+        }
+
+        const unique = Array.from(dedup.values());
+        console.log(
+          "[TTTV] filtered count",
+          filtered.length,
+          "unique",
+          unique.length
+        );
+        setRequests(unique);
       }
     } catch (err: any) {
       console.error("Failed to load tam-tru/tam-vang requests:", err);
@@ -370,7 +431,9 @@ export default function TamTruTamVangRequests() {
     try {
       const resp = await apiService.getTamTruVangRequestDetail(requestId);
       if (!resp?.success) {
-        throw new Error((resp as any)?.error?.message || "Không tải được chi tiết đơn");
+        throw new Error(
+          (resp as any)?.error?.message || "Không tải được chi tiết đơn"
+        );
       }
       downloadTamTruTamVangPdf(resp.data);
     } catch (e: any) {
@@ -599,11 +662,6 @@ export default function TamTruTamVangRequests() {
                       <div className="font-medium">
                         {request.nguoiGui?.hoTen || "-"}
                       </div>
-                      {request.nguoiGui?.cccd && (
-                        <div className="text-gray-500 text-xs">
-                          {request.nguoiGui.cccd}
-                        </div>
-                      )}
                     </td>
                     <td className="py-3 px-4 text-sm text-gray-600">
                       {(() => {

@@ -765,72 +765,119 @@ router.get(
 
       const combinedRows = [...requestRows, ...ttvRows];
 
-      const items = combinedRows
-        .map((row: any) => {
-          let payload: any = {};
-          let attachments = [];
-          try {
-            payload =
-              typeof row.payloadRaw === "string"
-                ? JSON.parse(row.payloadRaw)
-                : row.payloadRaw || {};
-            attachments = payload?.attachments || [];
-          } catch (e) {
-            payload = {};
-            attachments = [];
-          }
+      const mapped = combinedRows.map((row: any) => {
+        const source = row.payloadRaw === null ? "tam_tru_vang" : "requests";
+        let payload: any = {};
+        let attachments = [];
+        try {
+          payload =
+            typeof row.payloadRaw === "string"
+              ? JSON.parse(row.payloadRaw)
+              : row.payloadRaw || {};
+          attachments = payload?.attachments || [];
+        } catch (e) {
+          payload = {};
+          attachments = [];
+        }
 
-          payload = {
-            ...payload,
-            tuNgay: payload.tuNgay || row.tuNgay || null,
-            denNgay: payload.denNgay || row.denNgay || null,
-            lyDo: payload.lyDo || row.lyDo || null,
-            diaChi: payload.diaChi || row.diaChi || null,
-          };
+        payload = {
+          ...payload,
+          tuNgay: payload.tuNgay || row.tuNgay || null,
+          denNgay: payload.denNgay || row.denNgay || null,
+          lyDo: payload.lyDo || row.lyDo || null,
+          diaChi: payload.diaChi || row.diaChi || null,
+        };
 
-          const nguoiGui = {
-            hoTen: row.requesterName || row.personName || null,
-            username: row.personCccd || null,
-            cccd: row.personCccd || null,
-          };
+        // Sender shown to staff should be the requester (user), not the related person's CCCD.
+        const nguoiGui = {
+          hoTen: row.requesterName || null,
+          username: null,
+          cccd: null,
+        };
 
-          return {
-            id: row.id,
-            type: row.type,
-            status: row.status,
-            tuNgay: row.tuNgay,
-            denNgay: row.denNgay,
-            lyDo: row.lyDo,
-            nhanKhauId: row.nhanKhauId,
-            nguoiGui,
-            requesterUserId: row.requesterUserId,
-            rejectionReason: row.rejectionReason,
-            reviewedBy: row.reviewedBy,
-            reviewedAt: row.reviewedAt,
-            createdAt: row.createdAt,
-            payload,
-            requesterName: row.requesterName,
-            person: row.personId
-              ? {
-                  id: row.personId,
-                  hoTen: row.personName,
-                  cccd: row.personCccd,
-                }
-              : null,
-            household: row.householdId
-              ? {
-                  id: row.householdId,
-                  soHoKhau: row.householdCode,
-                  diaChi: row.householdAddress,
-                }
-              : null,
-            attachments: attachments,
-          };
-        })
-        .sort(
-          (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
+        return {
+          source,
+          id: row.id,
+          type: row.type,
+          status: row.status,
+          tuNgay: row.tuNgay,
+          denNgay: row.denNgay,
+          lyDo: row.lyDo,
+          nhanKhauId: row.nhanKhauId,
+          nguoiGui,
+          requesterUserId: row.requesterUserId,
+          rejectionReason: row.rejectionReason,
+          reviewedBy: row.reviewedBy,
+          reviewedAt: row.reviewedAt,
+          createdAt: row.createdAt,
+          payload,
+          requesterName: row.requesterName,
+          person: row.personId
+            ? {
+                id: row.personId,
+                hoTen: row.personName,
+                cccd: row.personCccd,
+              }
+            : null,
+          household: row.householdId
+            ? {
+                id: row.householdId,
+                soHoKhau: row.householdCode,
+                diaChi: row.householdAddress,
+              }
+            : null,
+          attachments: attachments,
+        };
+      });
+
+      // De-duplicate so each person appears at most once per temporary type.
+      // Prefer: PENDING > APPROVED > REJECTED, and prefer `tam_tru_vang` over legacy `requests`.
+      const normalizeTempType = (t: any) => {
+        const key = String(t || "").toUpperCase();
+        return key.includes("VANG") || key.includes("ABSENCE")
+          ? "TAM_VANG"
+          : "TAM_TRU";
+      };
+
+      const statusRank = (s: any) => {
+        const key = String(s || "").toUpperCase();
+        if (key.includes("PENDING") || key.includes("CHO")) return 3;
+        if (key.includes("APPROVED") || key.includes("DA_DUYET")) return 2;
+        if (key.includes("REJECTED") || key.includes("TU_CHOI")) return 1;
+        return 0;
+      };
+
+      const dedupMap = new Map<string, any>();
+      for (const it of mapped) {
+        const personKey = it.person?.id || it.nhanKhauId || "0";
+        const typeKey = normalizeTempType(it.type);
+        const key = `${personKey}|${typeKey}`;
+
+        const existing = dedupMap.get(key);
+        if (!existing) {
+          dedupMap.set(key, it);
+          continue;
+        }
+
+        const existingRank = statusRank(existing.status);
+        const nextRank = statusRank(it.status);
+
+        const preferNext =
+          nextRank > existingRank ||
+          (nextRank === existingRank &&
+            existing.source === "requests" &&
+            it.source === "tam_tru_vang") ||
+          (nextRank === existingRank &&
+            new Date(it.createdAt).getTime() >
+              new Date(existing.createdAt).getTime());
+
+        if (preferNext) dedupMap.set(key, it);
+      }
+
+      const items = Array.from(dedupMap.values()).sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
 
       const total = items.length;
       const paged = items.slice(offset, offset + perPage);

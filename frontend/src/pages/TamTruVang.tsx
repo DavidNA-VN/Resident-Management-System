@@ -13,6 +13,9 @@ interface RequestItem {
   lyDo?: string;
   nguoiGui?: { hoTen?: string; username?: string; cccd?: string };
   hoKhauLienQuan?: { id?: number; soHoKhau?: string; diaChi?: string };
+  requesterName?: string;
+  person?: { id?: number; hoTen?: string; cccd?: string };
+  household?: { id?: number; soHoKhau?: string; diaChi?: string };
   payload?: any;
 }
 
@@ -184,18 +187,18 @@ export default function TamTruVang() {
     if (!searchQuery.trim()) return byDate;
     const keyword = searchQuery.trim().toLowerCase();
     return byDate.filter((item) => {
-      const name = item.nguoiGui?.hoTen?.toLowerCase() || "";
-      const username = item.nguoiGui?.username?.toLowerCase() || "";
-      const cccd = item.nguoiGui?.cccd?.toLowerCase() || "";
+      const senderName =
+        item.requesterName?.toLowerCase() ||
+        item.nguoiGui?.hoTen?.toLowerCase() ||
+        "";
+      const personName = item.person?.hoTen?.toLowerCase() || "";
+      const personCccd = item.person?.cccd?.toLowerCase() || "";
       const soHoKhau =
+        item.household?.soHoKhau?.toLowerCase() ||
         item.hoKhauLienQuan?.soHoKhau?.toLowerCase() ||
         item.payload?.soHoKhau?.toLowerCase() ||
         "";
-      const address =
-        item.hoKhauLienQuan?.diaChi?.toLowerCase() ||
-        item.payload?.diaChi?.toLowerCase() ||
-        "";
-      return [name, username, cccd, soHoKhau, address].some((field) =>
+      return [senderName, personName, personCccd, soHoKhau].some((field) =>
         field.includes(keyword)
       );
     });
@@ -545,10 +548,7 @@ export default function TamTruVang() {
                     Người gửi
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
-                    CCCD
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
-                    Địa chỉ
+                    Liên quan
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-700">
                     Thời gian hiệu lực
@@ -582,15 +582,18 @@ export default function TamTruVang() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {request.nguoiGui?.hoTen ||
-                        request.nguoiGui?.username ||
-                        "-"}
+                      {request.requesterName || request.nguoiGui?.hoTen || "-"}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {request.nguoiGui?.cccd || "-"}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {request.payload?.diaChi || "-"}
+                      <div className="text-sm text-gray-900 font-medium">
+                        {request.person?.hoTen || "-"}
+                      </div>
+                      <div className="mt-0.5 text-xs text-gray-500">
+                        CCCD: {request.person?.cccd || "-"}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        Sổ hộ khẩu: {request.household?.soHoKhau || "-"}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {formatDateRange(
