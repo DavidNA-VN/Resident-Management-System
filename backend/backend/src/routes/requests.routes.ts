@@ -680,11 +680,14 @@ router.get(
         (r.payload->>'lyDo') as "lyDo",
         (r.payload->>'diaChi') as "diaChi",
         NULLIF(r.payload->>'nhanKhauId','')::int as "nhanKhauId",
-        u."fullName" as "requesterName",
+        COALESCE(u."fullName", un."hoTen") as "requesterName",
+        u.username as "requesterUsername",
+        COALESCE(u.cccd, un.cccd) as "requesterCccd",
         nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
         hk.id as "householdId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress"
       FROM requests r
       LEFT JOIN users u ON r."requesterUserId" = u.id
+      LEFT JOIN nhan_khau un ON u."personId" = un.id
       LEFT JOIN nhan_khau nk ON r."targetPersonId" = nk.id
       LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
       ${whereClause}
@@ -750,11 +753,14 @@ router.get(
           ttv."lyDo" AS "lyDo",
           ttv."diaChi" AS "diaChi",
           ttv."nhanKhauId" AS "nhanKhauId",
-          u."fullName" AS "requesterName",
+          COALESCE(u."fullName", un."hoTen") AS "requesterName",
+          u.username AS "requesterUsername",
+          COALESCE(u.cccd, un.cccd) AS "requesterCccd",
           nk.id AS "personId", nk."hoTen" AS "personName", nk.cccd AS "personCccd",
           hk.id AS "householdId", hk."soHoKhau" AS "householdCode", hk."diaChi" AS "householdAddress"
         FROM tam_tru_vang ttv
         LEFT JOIN users u ON ttv."nguoiDangKy" = u.id
+        LEFT JOIN nhan_khau un ON u."personId" = un.id
         LEFT JOIN nhan_khau nk ON ttv."nhanKhauId" = nk.id
         LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
         ${ttvWhere}
@@ -791,8 +797,8 @@ router.get(
         // Sender shown to staff should be the requester (user), not the related person's CCCD.
         const nguoiGui = {
           hoTen: row.requesterName || null,
-          username: null,
-          cccd: null,
+          username: row.requesterUsername || null,
+          cccd: row.requesterCccd || null,
         };
 
         return {
@@ -812,6 +818,8 @@ router.get(
           createdAt: row.createdAt,
           payload,
           requesterName: row.requesterName,
+          requesterUsername: row.requesterUsername || null,
+          requesterCccd: row.requesterCccd || null,
           person: row.personId
             ? {
                 id: row.personId,
@@ -1239,12 +1247,15 @@ router.get(
           (r.payload->>'lyDo') as "lyDo",
           (r.payload->>'diaChi') as "diaChi",
           r.payload,
-          u."fullName" as "requesterName",
+          COALESCE(u."fullName", un."hoTen") as "requesterName",
+          u.username as "requesterUsername",
+          COALESCE(u.cccd, un.cccd) as "requesterCccd",
           nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
           hk.id as "householdId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress",
           chu.id as "chuHoPersonId", chu."hoTen" as "chuHoName", chu.cccd as "chuHoCccd"
         FROM requests r
         LEFT JOIN users u ON r."requesterUserId" = u.id
+        LEFT JOIN nhan_khau un ON u."personId" = un.id
         LEFT JOIN nhan_khau nk ON r."targetPersonId" = nk.id
         LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
         LEFT JOIN nhan_khau chu ON hk."chuHoId" = chu.id
@@ -1278,12 +1289,15 @@ router.get(
             ttv."lyDo" AS "lyDo",
             ttv."diaChi" AS "diaChi",
             ttv.attachments AS payload,
-            u."fullName" AS "requesterName",
+            COALESCE(u."fullName", un."hoTen") AS "requesterName",
+            u.username AS "requesterUsername",
+            COALESCE(u.cccd, un.cccd) AS "requesterCccd",
             nk.id as "personId", nk."hoTen" as "personName", nk.cccd as "personCccd",
             hk.id as "householdId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress",
             chu.id as "chuHoPersonId", chu."hoTen" as "chuHoName", chu.cccd as "chuHoCccd"
           FROM tam_tru_vang ttv
           LEFT JOIN users u ON ttv."nguoiDangKy" = u.id
+          LEFT JOIN nhan_khau un ON u."personId" = un.id
           LEFT JOIN nhan_khau nk ON ttv."nhanKhauId" = nk.id
           LEFT JOIN ho_khau hk ON nk."hoKhauId" = hk.id
           LEFT JOIN nhan_khau chu ON hk."chuHoId" = chu.id
@@ -1352,6 +1366,8 @@ router.get(
         reviewedAt: row.reviewedAt,
         createdAt: row.createdAt,
         requesterName: row.requesterName,
+        requesterUsername: row.requesterUsername || null,
+        requesterCccd: row.requesterCccd || null,
         applicant,
         subject,
         person: row.personId
@@ -1941,9 +1957,14 @@ router.get(
       }
 
       const result = await query(
-        `SELECT r.*, u."fullName" as requesterName, u.username as requesterUsername, u.cccd as requesterCccd, ru."fullName" as reviewerName
+        `SELECT r.*, 
+                COALESCE(u."fullName", un."hoTen") as "requesterName",
+                u.username as "requesterUsername",
+                COALESCE(u.cccd, un.cccd) as "requesterCccd",
+                ru."fullName" as "reviewerName"
        FROM requests r
        LEFT JOIN users u ON r."requesterUserId" = u.id
+       LEFT JOIN nhan_khau un ON u."personId" = un.id
        LEFT JOIN users ru ON r."reviewedBy" = ru.id
        WHERE r.id = $1`,
         [requestId]
@@ -2042,12 +2063,13 @@ router.get(
       // Build query selecting requester and related household/person info
       let queryStr = `
       SELECT r.id, r.code, r.type, r.status, r."createdAt", r.priority,
-             u.id as "requesterId", u."fullName" as "requesterName", u.username as "requesterUsername", u.cccd as "requesterCccd",
+              u.id as "requesterId", COALESCE(u."fullName", un."hoTen") as "requesterName", u.username as "requesterUsername", COALESCE(u.cccd, un.cccd) as "requesterCccd",
             hk.id as "hoKhauId", hk."soHoKhau" as "householdCode", hk."diaChi" as "householdAddress",
              nk.id as "nhanKhauId", nk."hoTen" as "nhanKhauName",
              r.payload
       FROM requests r
       LEFT JOIN users u ON r."requesterUserId" = u.id
+            LEFT JOIN nhan_khau un ON u."personId" = un.id
       LEFT JOIN ho_khau hk ON r."targetHouseholdId" = hk.id
       LEFT JOIN nhan_khau nk ON r."targetPersonId" = nk.id
       WHERE 1=1

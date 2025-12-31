@@ -72,6 +72,243 @@ const extractRequester = (raw: any) => {
   return { name, cccd };
 };
 
+const gioiTinhLabel = (v: any) => {
+  const s = String(v || "").toLowerCase();
+  if (s === "nam") return "Nam";
+  if (s === "nu") return "Nữ";
+  if (s === "khac") return "Khác";
+  return v ? String(v) : "";
+};
+
+const hoKhauCodeLabel = (v: any) => {
+  const s = String(v ?? "").trim();
+  if (!s) return "";
+
+  // Accept formats like: 1, 0001, hk1, HK0001, hk-0001
+  const m = s.match(/^(hk)[\s\-_]*0*(\d+)$/i);
+  if (m) return `hk${String(m[2]).padStart(4, "0")}`;
+  if (/^\d+$/.test(s)) return `hk${s.padStart(4, "0")}`;
+
+  return s;
+};
+
+const formatValueForPath = (
+  path: string,
+  value: string,
+  requestDetail: RequestDetail
+) => {
+  const raw = String(path || "").trim();
+  const segments = raw.split(".");
+  const lastSeg = segments[segments.length - 1] || "";
+  const lastBase = lastSeg.replace(/\[\d+\]/g, "");
+  const key = normalizeKey(lastBase);
+
+  if (key === "gioitinh" || key === "gender" || key === "sex") {
+    return gioiTinhLabel(value);
+  }
+
+  if (key === "householdid" || key === "targethouseholdid") {
+    const soHoKhau = firstNonEmpty(
+      requestDetail?.hoKhauLienQuan?.soHoKhau,
+      requestDetail?.payload?.soHoKhau,
+      requestDetail?.payload?.sohokhau
+    );
+    return hoKhauCodeLabel(soHoKhau || value) || value;
+  }
+
+  return value;
+};
+
+const quanHeOptions = [
+  { value: "chu_ho", label: "Chủ hộ" },
+  { value: "vo_chong", label: "Vợ/Chồng" },
+  { value: "con", label: "Con" },
+  { value: "cha_me", label: "Cha/Mẹ" },
+  { value: "anh_chi_em", label: "Anh/Chị/Em" },
+  { value: "ong_ba", label: "Ông/Bà" },
+  { value: "chau", label: "Cháu" },
+  { value: "khac", label: "Khác" },
+];
+
+const quanHeLabel = (v: any) => {
+  const s = String(v || "");
+  const found = quanHeOptions.find((x) => x.value === s);
+  return found ? found.label : s;
+};
+
+type FlatField = {
+  path: string;
+  value: string;
+};
+
+const isPlainObject = (v: any) =>
+  v !== null &&
+  typeof v === "object" &&
+  !Array.isArray(v) &&
+  !(v instanceof Date);
+
+const formatScalarForDisplay = (v: any): string => {
+  if (v === undefined) return "";
+  if (v === null) return "";
+  if (typeof v === "boolean") return v ? "Có" : "Không";
+  if (typeof v === "number") return String(v);
+  if (typeof v === "string") return v;
+  // Fallback for unexpected scalar-like values
+  try {
+    return String(v);
+  } catch {
+    return "";
+  }
+};
+
+const flattenPayloadForForm = (
+  value: any,
+  prefix = "",
+  out: FlatField[] = []
+): FlatField[] => {
+  if (value === undefined || value === null) return out;
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return out;
+
+    const allScalars = value.every(
+      (x) =>
+        x === null ||
+        x === undefined ||
+        ["string", "number", "boolean"].includes(typeof x)
+    );
+
+    if (allScalars) {
+      out.push({
+        path: prefix || "payload",
+        value: value
+          .map((x) => formatScalarForDisplay(x))
+          .filter(Boolean)
+          .join("\n"),
+      });
+      return out;
+    }
+
+    value.forEach((item, idx) => {
+      const p = prefix ? `${prefix}[${idx}]` : `[${idx}]`;
+      flattenPayloadForForm(item, p, out);
+    });
+    return out;
+  }
+
+  if (isPlainObject(value)) {
+    for (const key of Object.keys(value)) {
+      const nextPrefix = prefix ? `${prefix}.${key}` : key;
+      flattenPayloadForForm(value[key], nextPrefix, out);
+    }
+    return out;
+  }
+
+  out.push({ path: prefix || "payload", value: formatScalarForDisplay(value) });
+  return out;
+};
+
+const shouldUseTextArea = (v: string) => {
+  const s = String(v || "");
+  return s.includes("\n") || s.length > 80;
+};
+
+const labelMap: Record<string, string> = {
+  // Common
+  lydo: "Lý do",
+  reason: "Lý do",
+  noidung: "Nội dung",
+  note: "Ghi chú",
+  ghichu: "Ghi chú",
+  diachi: "Địa chỉ",
+  sohokhau: "Số hộ khẩu",
+  tungay: "Từ ngày",
+  denngay: "Đến ngày",
+  ngaydukiem: "Ngày dự kiến",
+  expecteddate: "Ngày dự kiến",
+  newaddress: "Địa chỉ mới",
+  ismoisinh: "Là trẻ sơ sinh",
+  isnewborn: "Là trẻ sơ sinh",
+  // Person/Newborn fields
+  hoten: "Họ và tên",
+  cccd: "CCCD/CMND",
+  bidanh: "Bí danh",
+  ngaysinh: "Ngày sinh",
+  gioitinh: "Giới tính",
+  noisinh: "Nơi sinh",
+  nguyenquan: "Nguyên quán",
+  dantoc: "Dân tộc",
+  tongiao: "Tôn giáo",
+  quoctich: "Quốc tịch",
+  quanhe: "Quan hệ",
+  ngaydangkythuongtru: "Ngày đăng ký thường trú",
+  diachithuongtrutruoc: "Địa chỉ thường trú trước đây",
+  nghenghiep: "Nghề nghiệp",
+  noilamviec: "Nơi làm việc",
+  ngaycapcccd: "Ngày cấp CCCD",
+  noicapcccd: "Nơi cấp CCCD",
+  // Deceased / move-out
+  ngaymat: "Ngày mất",
+  noimat: "Nơi mất",
+  ngaychet: "Ngày mất",
+  noichet: "Nơi mất",
+  ngayquadoi: "Ngày mất",
+  noiquadoi: "Nơi mất",
+  // IDs / misc
+  nhankhauid: "ID nhân khẩu",
+  personid: "ID nhân khẩu",
+  targetpersonid: "ID nhân khẩu",
+  householdid: "ID hộ khẩu",
+  targethouseholdid: "ID hộ khẩu",
+  selectednhankhauids: "Danh sách nhân khẩu tách ra",
+  newchuhoid: "Chủ hộ mới (ID)",
+};
+
+const normalizeKey = (k: string) =>
+  String(k || "")
+    .trim()
+    .toLowerCase();
+
+const humanizeKey = (k: string) => {
+  const s = String(k || "").trim();
+  if (!s) return "";
+  const spaced = s
+    .replace(/_/g, " ")
+    .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+};
+
+const labelForKey = (k: string) => {
+  const nk = normalizeKey(k);
+  return labelMap[nk] || humanizeKey(k);
+};
+
+const labelForPath = (path: string) => {
+  const raw = String(path || "").trim();
+  if (!raw) return "";
+
+  const segments = raw.split(".");
+  const lastSeg = segments[segments.length - 1] || "";
+  const lastBase = lastSeg.replace(/\[\d+\]/g, "");
+  const lastIdxMatch = lastSeg.match(/\[(\d+)\]/);
+  const lastLabelBase = labelForKey(lastBase);
+  return lastIdxMatch ? `${lastLabelBase} #${lastIdxMatch[1]}` : lastLabelBase;
+};
+
+const requestDetailTitle = (type: string) => {
+  const label = requestTypeLabels[type] || type;
+  let s = String(label || "").trim();
+  s = s.replace(/^Yêu\s+cầu\s+/i, "");
+  s = s
+    .replace(/^Xin\s+/i, "xin ")
+    .replace(/^Thêm\s+/i, "thêm ")
+    .replace(/^Sửa\s+/i, "sửa ")
+    .replace(/^Xoá\s+/i, "xoá ")
+    .replace(/^Xác\s+nhận\s+/i, "xác nhận ");
+  return s ? `Chi tiết yêu cầu ${s}` : "Chi tiết yêu cầu";
+};
 
 const requestTypeLabels: Record<string, string> = {
   TACH_HO_KHAU: "Yêu cầu tách hộ khẩu",
@@ -173,7 +410,9 @@ export default function RequestDetailModal({
         });
 
         // If backend reports precheck warnings, suggest a reject reason up-front
-        const ws = Array.isArray(raw?.precheck?.warnings) ? raw.precheck.warnings : [];
+        const ws = Array.isArray(raw?.precheck?.warnings)
+          ? raw.precheck.warnings
+          : [];
         if (ws.length > 0) {
           const suggested = buildRejectReasonFromWarnings(ws);
           setRejectReason((prev) => (prev.trim() ? prev : suggested));
@@ -206,7 +445,8 @@ export default function RequestDetailModal({
   const handleApprove = async () => {
     if (hasBlockingWarnings) {
       const suggested = buildRejectReasonFromWarnings(warnings);
-      if (suggested) setRejectReason((prev) => (prev.trim() ? prev : suggested));
+      if (suggested)
+        setRejectReason((prev) => (prev.trim() ? prev : suggested));
       setError(
         "Yêu cầu có cảnh báo/điều kiện tiên quyết nên không thể duyệt. Vui lòng từ chối và ghi rõ lý do."
       );
@@ -470,7 +710,9 @@ export default function RequestDetailModal({
                       Cảnh báo trước khi duyệt
                     </h3>
                     <p className="text-sm text-yellow-900 mb-3">
-                      Yêu cầu này đang có điều kiện tiên quyết chưa đạt. Để tránh duyệt xong bị lỗi, hệ thống khóa nút Duyệt và bạn cần Từ chối kèm lý do.
+                      Yêu cầu này đang có điều kiện tiên quyết chưa đạt. Để
+                      tránh duyệt xong bị lỗi, hệ thống khóa nút Duyệt và bạn
+                      cần Từ chối kèm lý do.
                     </p>
                     <ul className="list-disc pl-5 space-y-1 text-sm text-yellow-900">
                       {warnings.map((w: any, idx: number) => (
@@ -480,7 +722,8 @@ export default function RequestDetailModal({
                     <div className="mt-3 flex gap-2">
                       <button
                         onClick={() => {
-                          const suggested = buildRejectReasonFromWarnings(warnings);
+                          const suggested =
+                            buildRejectReasonFromWarnings(warnings);
                           if (suggested) setRejectReason(suggested);
                           setShowRejectModal(true);
                         }}
@@ -665,89 +908,354 @@ export default function RequestDetailModal({
                     </div>
                   )}
 
-                {requestDetail.type === "ADD_PERSON" && requestDetail.payload && (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                      Chi tiết yêu cầu thêm nhân khẩu
-                    </h3>
-                    <div className="space-y-4">
-                      <div>
-                        <p className="text-sm font-medium text-gray-700 mb-2">
-                          Thông tin nhân khẩu
-                        </p>
-                        <div className="bg-gray-50 rounded p-3 text-sm text-gray-700 space-y-1">
-                          <p>
-                            Họ tên: {requestDetail.payload?.person?.hoTen || "-"}
-                          </p>
-                          <p>
-                            CCCD: {requestDetail.payload?.person?.cccd || "-"}
-                          </p>
-                          <p>
-                            Ngày sinh:{" "}
-                            {requestDetail.payload?.person?.ngaySinh
-                              ? formatFromYMD(requestDetail.payload.person.ngaySinh)
-                              : "-"}
-                          </p>
-                          <p>
-                            Giới tính: {requestDetail.payload?.person?.gioiTinh || "-"}
-                          </p>
-                          <p>
-                            Nơi sinh: {requestDetail.payload?.person?.noiSinh || "-"}
-                          </p>
-                          <p>
-                            Quan hệ: {requestDetail.payload?.person?.quanHe || "-"}
-                          </p>
-                          {requestDetail.payload?.person?.ngheNghiep && (
-                            <p>Nghề nghiệp: {requestDetail.payload.person.ngheNghiep}</p>
-                          )}
-                          {requestDetail.payload?.person?.ghiChu && (
-                            <p className="whitespace-pre-wrap">
-                              Ghi chú: {requestDetail.payload.person.ghiChu}
-                            </p>
-                          )}
-                        </div>
-                      </div>
+                {requestDetail.type === "ADD_PERSON" &&
+                  requestDetail.payload && (
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                        Chi tiết yêu cầu thêm nhân khẩu
+                      </h3>
+                      {(() => {
+                        const payload: any = requestDetail.payload || {};
+                        const person: any = payload.person || payload;
+                        const householdId =
+                          payload.targetHouseholdId ||
+                          requestDetail.targetHouseholdId ||
+                          payload?.person?.householdId ||
+                          person?.householdId ||
+                          "";
 
-                      {requestDetail.payload?.reason && (
-                        <div>
-                          <p className="text-sm font-medium text-gray-700 mb-2">Lý do</p>
-                          <p className="text-sm text-gray-600 whitespace-pre-wrap">
-                            {requestDetail.payload.reason}
-                          </p>
-                        </div>
-                      )}
+                        const householdDisplay =
+                          hoKhauCodeLabel(
+                            requestDetail.hoKhauLienQuan?.soHoKhau ||
+                              householdId
+                          ) || (householdId ? String(householdId) : "");
+
+                        return (
+                          <div className="space-y-4">
+                            <p className="text-sm text-gray-600">
+                              Thông tin dưới đây được hiển thị theo đúng form
+                              người dân đã nhập (chỉ để xem).
+                            </p>
+
+                            <label className="block text-sm font-medium text-gray-700">
+                              Hộ khẩu
+                              <input
+                                type="text"
+                                disabled
+                                value={householdDisplay}
+                                className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                              />
+                            </label>
+
+                            <div className="grid grid-cols-3 gap-4">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Họ và tên
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.hoTen ? String(person.hoTen) : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                  autoComplete="off"
+                                  spellCheck={false}
+                                />
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                CCCD/CMND
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.cccd ? String(person.cccd) : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                Bí danh
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.biDanh ? String(person.biDanh) : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Ngày cấp CCCD
+                                <input
+                                  type="date"
+                                  disabled
+                                  value={
+                                    person?.ngayCapCCCD
+                                      ? String(person.ngayCapCCCD)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                Nơi cấp CCCD
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.noiCapCCCD
+                                      ? String(person.noiCapCCCD)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                Ngày đăng ký thường trú
+                                <input
+                                  type="date"
+                                  disabled
+                                  value={
+                                    person?.ngayDangKyThuongTru
+                                      ? String(person.ngayDangKyThuongTru)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Ngày sinh
+                                <input
+                                  type="date"
+                                  disabled
+                                  value={
+                                    person?.ngaySinh
+                                      ? String(person.ngaySinh)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                Giới tính
+                                <select
+                                  disabled
+                                  value={
+                                    person?.gioiTinh
+                                      ? String(person.gioiTinh)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                >
+                                  <option value="">
+                                    {person?.gioiTinh
+                                      ? gioiTinhLabel(person.gioiTinh)
+                                      : ""}
+                                  </option>
+                                  <option value="nam">Nam</option>
+                                  <option value="nu">Nữ</option>
+                                  <option value="khac">Khác</option>
+                                </select>
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                Nơi sinh
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.noiSinh
+                                      ? String(person.noiSinh)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Nguyên quán
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.nguyenQuan
+                                      ? String(person.nguyenQuan)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                Dân tộc
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.danToc ? String(person.danToc) : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                Tôn giáo
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.tonGiao
+                                      ? String(person.tonGiao)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Quốc tịch
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.quocTich
+                                      ? String(person.quocTich)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                Quan hệ với chủ hộ
+                                <select
+                                  disabled
+                                  value={
+                                    person?.quanHe ? String(person.quanHe) : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                >
+                                  <option value="">
+                                    {person?.quanHe
+                                      ? quanHeLabel(person.quanHe)
+                                      : ""}
+                                  </option>
+                                  {quanHeOptions.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
+
+                            <label className="block text-sm font-medium text-gray-700">
+                              Địa chỉ thường trú trước đây
+                              <textarea
+                                disabled
+                                value={
+                                  person?.diaChiThuongTruTruoc
+                                    ? String(person.diaChiThuongTruTruoc)
+                                    : ""
+                                }
+                                rows={2}
+                                className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                              />
+                            </label>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Nghề nghiệp
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.ngheNghiep
+                                      ? String(person.ngheNghiep)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+
+                              <label className="block text-sm font-medium text-gray-700">
+                                Nơi làm việc
+                                <input
+                                  type="text"
+                                  disabled
+                                  value={
+                                    person?.noiLamViec
+                                      ? String(person.noiLamViec)
+                                      : ""
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+                            </div>
+
+                            <label className="block text-sm font-medium text-gray-700">
+                              Ghi chú
+                              <textarea
+                                disabled
+                                value={
+                                  person?.ghiChu ? String(person.ghiChu) : ""
+                                }
+                                rows={2}
+                                className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                              />
+                            </label>
+                          </div>
+                        );
+                      })()}
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {requestDetail.type === "ADD_NEWBORN" && requestDetail.payload && (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                      Chi tiết yêu cầu thêm con sơ sinh
-                    </h3>
-                    {(() => {
-                      const newborn = requestDetail.payload?.newborn || requestDetail.payload;
-                      return (
-                        <div className="bg-gray-50 rounded p-3 text-sm text-gray-700 space-y-1">
-                          <p>Họ tên: {newborn?.hoTen || "-"}</p>
-                          <p>
-                            Ngày sinh:{" "}
-                            {newborn?.ngaySinh
-                              ? formatFromYMD(newborn.ngaySinh)
-                              : "-"}
-                          </p>
-                          <p>Giới tính: {newborn?.gioiTinh || "-"}</p>
-                          <p>Nơi sinh: {newborn?.noiSinh || "-"}</p>
-                          {newborn?.isMoiSinh !== undefined && (
+                {requestDetail.type === "ADD_NEWBORN" &&
+                  requestDetail.payload && (
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                        Chi tiết yêu cầu thêm con sơ sinh
+                      </h3>
+                      {(() => {
+                        const newborn =
+                          requestDetail.payload?.newborn ||
+                          requestDetail.payload;
+                        return (
+                          <div className="bg-gray-50 rounded p-3 text-sm text-gray-700 space-y-1">
+                            <p>Họ tên: {newborn?.hoTen || "-"}</p>
                             <p>
-                              Trẻ mới sinh: {newborn.isMoiSinh ? "Có" : "Không"}
+                              Ngày sinh:{" "}
+                              {newborn?.ngaySinh
+                                ? formatFromYMD(newborn.ngaySinh)
+                                : "-"}
                             </p>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
+                            <p>Giới tính: {newborn?.gioiTinh || "-"}</p>
+                            <p>Nơi sinh: {newborn?.noiSinh || "-"}</p>
+                            {newborn?.isMoiSinh !== undefined && (
+                              <p>
+                                Trẻ mới sinh:{" "}
+                                {newborn.isMoiSinh ? "Có" : "Không"}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                 {(requestDetail.type === "SUA_NHAN_KHAU" ||
                   requestDetail.type === "UPDATE_PERSON") &&
@@ -764,7 +1272,9 @@ export default function RequestDetailModal({
                               Nhân khẩu cần sửa
                             </p>
                             <p className="text-sm text-gray-600">
-                              ID: {requestDetail.payload.nhanKhauId || requestDetail.payload.personId}
+                              ID:{" "}
+                              {requestDetail.payload.nhanKhauId ||
+                                requestDetail.payload.personId}
                             </p>
                           </div>
                         )}
@@ -826,7 +1336,9 @@ export default function RequestDetailModal({
                               Nhân khẩu cần xoá
                             </p>
                             <p className="text-sm text-gray-600">
-                              ID: {requestDetail.payload.nhanKhauId || requestDetail.payload.personId}
+                              ID:{" "}
+                              {requestDetail.payload.nhanKhauId ||
+                                requestDetail.payload.personId}
                             </p>
                           </div>
                         )}
@@ -847,120 +1359,122 @@ export default function RequestDetailModal({
                 {(requestDetail.type === "TAM_TRU" ||
                   requestDetail.type === "TEMPORARY_RESIDENCE") &&
                   requestDetail.payload && (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                      Chi tiết yêu cầu tạm trú
-                    </h3>
-                    <div className="space-y-4">
-                      {requestDetail.payload.nhanKhauId && (
-                        <div>
-                          <p className="text-sm font-medium text-gray-700 mb-2">
-                            Nhân khẩu xin tạm trú
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            ID: {requestDetail.payload.nhanKhauId}
-                          </p>
-                        </div>
-                      )}
-                      {(requestDetail.payload.soHoKhau || requestDetail.payload.diaChi) && (
-                        <div>
-                          <p className="text-sm font-medium text-gray-700 mb-2">
-                            Số hộ khẩu
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            {requestDetail.payload.soHoKhau || requestDetail.payload.diaChi}
-                          </p>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-4">
-                        {requestDetail.payload.tuNgay && (
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                        Chi tiết yêu cầu tạm trú
+                      </h3>
+                      <div className="space-y-4">
+                        {requestDetail.payload.nhanKhauId && (
                           <div>
                             <p className="text-sm font-medium text-gray-700 mb-2">
-                              Từ ngày
+                              Nhân khẩu xin tạm trú
                             </p>
                             <p className="text-sm text-gray-600">
-                              {formatFromYMD(requestDetail.payload.tuNgay)}
+                              ID: {requestDetail.payload.nhanKhauId}
                             </p>
                           </div>
                         )}
-                        {requestDetail.payload.denNgay && (
+                        {(requestDetail.payload.soHoKhau ||
+                          requestDetail.payload.diaChi) && (
                           <div>
                             <p className="text-sm font-medium text-gray-700 mb-2">
-                              Đến ngày
+                              Số hộ khẩu
                             </p>
                             <p className="text-sm text-gray-600">
-                              {formatFromYMD(requestDetail.payload.denNgay)}
+                              {requestDetail.payload.soHoKhau ||
+                                requestDetail.payload.diaChi}
+                            </p>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-4">
+                          {requestDetail.payload.tuNgay && (
+                            <div>
+                              <p className="text-sm font-medium text-gray-700 mb-2">
+                                Từ ngày
+                              </p>
+                              <p className="text-sm text-gray-600">
+                                {formatFromYMD(requestDetail.payload.tuNgay)}
+                              </p>
+                            </div>
+                          )}
+                          {requestDetail.payload.denNgay && (
+                            <div>
+                              <p className="text-sm font-medium text-gray-700 mb-2">
+                                Đến ngày
+                              </p>
+                              <p className="text-sm text-gray-600">
+                                {formatFromYMD(requestDetail.payload.denNgay)}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        {requestDetail.payload.lyDo && (
+                          <div>
+                            <p className="text-sm font-medium text-gray-700 mb-2">
+                              Lý do
+                            </p>
+                            <p className="text-sm text-gray-600 whitespace-pre-wrap">
+                              {requestDetail.payload.lyDo}
                             </p>
                           </div>
                         )}
                       </div>
-                      {requestDetail.payload.lyDo && (
-                        <div>
-                          <p className="text-sm font-medium text-gray-700 mb-2">
-                            Lý do
-                          </p>
-                          <p className="text-sm text-gray-600 whitespace-pre-wrap">
-                            {requestDetail.payload.lyDo}
-                          </p>
-                        </div>
-                      )}
                     </div>
-                  </div>
-                )}
+                  )}
 
                 {(requestDetail.type === "TAM_VANG" ||
                   requestDetail.type === "TEMPORARY_ABSENCE") &&
                   requestDetail.payload && (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                      Chi tiết yêu cầu tạm vắng
-                    </h3>
-                    <div className="space-y-4">
-                      {requestDetail.payload.nhanKhauId && (
-                        <div>
-                          <p className="text-sm font-medium text-gray-700 mb-2">
-                            Nhân khẩu xin tạm vắng
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            ID: {requestDetail.payload.nhanKhauId}
-                          </p>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-4">
-                        {requestDetail.payload.tuNgay && (
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                        Chi tiết yêu cầu tạm vắng
+                      </h3>
+                      <div className="space-y-4">
+                        {requestDetail.payload.nhanKhauId && (
                           <div>
                             <p className="text-sm font-medium text-gray-700 mb-2">
-                              Từ ngày
+                              Nhân khẩu xin tạm vắng
                             </p>
                             <p className="text-sm text-gray-600">
-                              {formatFromYMD(requestDetail.payload.tuNgay)}
+                              ID: {requestDetail.payload.nhanKhauId}
                             </p>
                           </div>
                         )}
-                        {requestDetail.payload.denNgay && (
+                        <div className="grid grid-cols-2 gap-4">
+                          {requestDetail.payload.tuNgay && (
+                            <div>
+                              <p className="text-sm font-medium text-gray-700 mb-2">
+                                Từ ngày
+                              </p>
+                              <p className="text-sm text-gray-600">
+                                {formatFromYMD(requestDetail.payload.tuNgay)}
+                              </p>
+                            </div>
+                          )}
+                          {requestDetail.payload.denNgay && (
+                            <div>
+                              <p className="text-sm font-medium text-gray-700 mb-2">
+                                Đến ngày
+                              </p>
+                              <p className="text-sm text-gray-600">
+                                {formatFromYMD(requestDetail.payload.denNgay)}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        {requestDetail.payload.lyDo && (
                           <div>
                             <p className="text-sm font-medium text-gray-700 mb-2">
-                              Đến ngày
+                              Lý do
                             </p>
-                            <p className="text-sm text-gray-600">
-                              {formatFromYMD(requestDetail.payload.denNgay)}
+                            <p className="text-sm text-gray-600 whitespace-pre-wrap">
+                              {requestDetail.payload.lyDo}
                             </p>
                           </div>
                         )}
                       </div>
-                      {requestDetail.payload.lyDo && (
-                        <div>
-                          <p className="text-sm font-medium text-gray-700 mb-2">
-                            Lý do
-                          </p>
-                          <p className="text-sm text-gray-600 whitespace-pre-wrap">
-                            {requestDetail.payload.lyDo}
-                          </p>
-                        </div>
-                      )}
                     </div>
-                  </div>
-                )}
+                  )}
 
                 {requestDetail.type === "DECEASED" && requestDetail.payload && (
                   <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -1050,6 +1564,105 @@ export default function RequestDetailModal({
                   </div>
                 )}
 
+                {/* Universal read-only form: show ALL payload fields user entered */}
+                {requestDetail.type !== "ADD_PERSON" && (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      {requestDetailTitle(requestDetail.type)}
+                    </h3>
+                    {(() => {
+                      const rd: any = requestDetail as any;
+                      const related =
+                        rd?.nhanKhauLienQuan ||
+                        rd?.subject ||
+                        rd?.person ||
+                        rd?.payload?.person ||
+                        null;
+                      const relatedName =
+                        related?.hoTen ||
+                        related?.personName ||
+                        related?.name ||
+                        "";
+                      const relatedCccd =
+                        related?.cccd || related?.personCccd || "";
+
+                      const payload = requestDetail.payload;
+                      const fields = flattenPayloadForForm(payload);
+                      if (
+                        (!fields || fields.length === 0) &&
+                        !relatedName &&
+                        !relatedCccd
+                      ) {
+                        return (
+                          <div className="text-sm text-gray-500">
+                            Không có dữ liệu để hiển thị.
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-4">
+                          {(relatedName || relatedCccd) && (
+                            <div className="grid grid-cols-2 gap-4">
+                              <label className="block text-sm font-medium text-gray-700">
+                                Họ và tên
+                                <input
+                                  disabled
+                                  value={relatedName ? String(relatedName) : ""}
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-gray-700">
+                                CCCD/CMND
+                                <input
+                                  disabled
+                                  value={relatedCccd ? String(relatedCccd) : ""}
+                                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                />
+                              </label>
+                            </div>
+                          )}
+
+                          {fields && fields.length > 0 && (
+                            <div className="space-y-3">
+                              {fields.map((f) => {
+                                const label = labelForPath(f.path);
+                                const value = formatValueForPath(
+                                  f.path,
+                                  f.value ?? "",
+                                  requestDetail
+                                );
+                                return (
+                                  <label
+                                    key={f.path}
+                                    className="block text-sm font-medium text-gray-700"
+                                  >
+                                    {label}
+                                    {shouldUseTextArea(value) ? (
+                                      <textarea
+                                        disabled
+                                        value={value}
+                                        rows={3}
+                                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                      />
+                                    ) : (
+                                      <input
+                                        disabled
+                                        value={value}
+                                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                                      />
+                                    )}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 {/* Actions */}
                 {String(requestDetail.status || "").toUpperCase() ===
                   "PENDING" && (
@@ -1068,8 +1681,12 @@ export default function RequestDetailModal({
                     <button
                       onClick={() => {
                         if (hasBlockingWarnings) {
-                          const suggested = buildRejectReasonFromWarnings(warnings);
-                          if (suggested) setRejectReason((prev) => (prev.trim() ? prev : suggested));
+                          const suggested =
+                            buildRejectReasonFromWarnings(warnings);
+                          if (suggested)
+                            setRejectReason((prev) =>
+                              prev.trim() ? prev : suggested
+                            );
                         }
                         setShowRejectModal(true);
                       }}

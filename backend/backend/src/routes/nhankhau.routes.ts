@@ -141,7 +141,11 @@ router.get(
       const feedbackStatus = String(req.query.feedbackStatus || "").trim();
 
       const hasFilters =
-        ageGroup || gender || residenceStatus || movementStatus || feedbackStatus;
+        ageGroup ||
+        gender ||
+        residenceStatus ||
+        movementStatus ||
+        feedbackStatus;
 
       if (!hasFilters && q.length < 2) {
         return res.status(400).json({
@@ -185,7 +189,9 @@ router.get(
       if (ageGroup && ageRanges[ageGroup]) {
         const [minAge, maxAge] = ageRanges[ageGroup];
         values.push(minAge, maxAge);
-        conditions.push(`(nw."ageYears" BETWEEN $${values.length - 1} AND $${values.length})`);
+        conditions.push(
+          `(nw."ageYears" BETWEEN $${values.length - 1} AND $${values.length})`
+        );
       }
 
       if (gender) {
@@ -221,7 +227,8 @@ router.get(
         conditions.push(`nw."pendingReportsCount" = 0`);
       }
 
-      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const whereClause =
+        conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
       const result = await query(
         `WITH nk_with AS (
@@ -347,13 +354,16 @@ router.post(
         ngayDangKyThuongTru,
         diaChiThuongTruTruoc,
       ];
-      if (requiredFields.some((f) => f === undefined || f === null || String(f).trim() === "")) {
+      if (
+        requiredFields.some(
+          (f) => f === undefined || f === null || String(f).trim() === ""
+        )
+      ) {
         return res.status(400).json({
           success: false,
           error: {
             code: "VALIDATION_ERROR",
-            message:
-              "Vui lòng nhập đầy đủ các trường bắt buộc (trừ Ghi chú)",
+            message: "Vui lòng nhập đầy đủ các trường bắt buộc (trừ Ghi chú)",
           },
         });
       }
@@ -445,7 +455,7 @@ router.post(
           `INSERT INTO nhan_khau
            ("hoKhauId","hoTen","biDanh","cccd","ngayCapCCCD","noiCapCCCD","ngaySinh","gioiTinh","noiSinh","nguyenQuan","danToc","tonGiao","quocTich","quanHe","ngayDangKyThuongTru","diaChiThuongTruTruoc","ngheNghiep","noiLamViec","ghiChu","ghiChuHoKhau","lyDoKhongCoCCCD")
            VALUES
-           ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+           ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
            RETURNING *`,
           [
             hoKhauId,
