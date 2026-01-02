@@ -1,0 +1,42 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "frontend build",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "frontend build (cwd)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"cd \"d:\\20243\\KTPM\\Test clone\\Resident-Management-System\\frontend\"; npm run build"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "frontend build (cmd cwd)",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd /d \"d:\\20243\\KTPM\\Test clone\\Resident-Management-System\\frontend\" & npm run build"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
