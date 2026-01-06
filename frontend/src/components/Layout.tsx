@@ -24,7 +24,11 @@ function canAccessPath(user: UserInfo | null, path: string): boolean {
   if (!user) return false;
 
   // Leaders/admin: full access
-  if (user.role === "to_truong" || user.role === "to_pho" || user.role === "admin") {
+  if (
+    user.role === "to_truong" ||
+    user.role === "to_pho" ||
+    user.role === "admin"
+  ) {
     return true;
   }
 
@@ -57,13 +61,13 @@ export default function Layout({ children }: LayoutProps) {
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
   const menuItems = [
-    { path: "/dashboard", label: "Dashboard", icon: "📊" },
-    { path: "/ho-khau", label: "Hộ khẩu", icon: "🏠" },
-    { path: "/nhan-khau", label: "Nhân khẩu", icon: "👥" },
-    { path: "/requests", label: "Yêu cầu", icon: "📋" },
-    { path: "/tam-tru-vang", label: "Tạm trú / Tạm vắng", icon: "📍" },
-    { path: "/phan-anh", label: "Phản ánh", icon: "💬" },
-    { path: "/thong-ke", label: "Thống kê", icon: "📈" }
+    { path: "/dashboard", label: "Dashboard" },
+    { path: "/ho-khau", label: "Hộ khẩu" },
+    { path: "/nhan-khau", label: "Nhân khẩu" },
+    { path: "/requests", label: "Yêu cầu" },
+    { path: "/tam-tru-vang", label: "Tạm trú / Tạm vắng" },
+    { path: "/phan-anh", label: "Phản ánh" },
+    { path: "/thong-ke", label: "Thống kê" },
   ];
 
   useEffect(() => {
@@ -149,7 +153,6 @@ export default function Layout({ children }: LayoutProps) {
                           : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 hover:scale-[1.01]"
                       }`}
                     >
-                      <span className="text-lg">{item.icon}</span>
                       {isSidebarOpen && <span>{item.label}</span>}
                     </Link>
                   </li>
@@ -162,8 +165,12 @@ export default function Layout({ children }: LayoutProps) {
         <div className="border-t border-gray-200/60 p-4 bg-gray-50/50">
           {isSidebarOpen && (
             <div className="mb-3 rounded-lg bg-white border border-gray-200 p-3 shadow-sm">
-              <p className="text-xs text-gray-500 mb-1">Đăng nhập với tư cách</p>
-              <p className="text-sm font-semibold text-gray-900 leading-tight">{userName}</p>
+              <p className="text-xs text-gray-500 mb-1">
+                Đăng nhập với tư cách
+              </p>
+              <p className="text-sm font-semibold text-gray-900 leading-tight">
+                {userName}
+              </p>
             </div>
           )}
           <button
@@ -178,13 +185,8 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50/50 via-white to-gray-50/50 p-6">
-        <div className="max-w-7xl mx-auto">
-          {children}
-        </div>
+        <div className="max-w-7xl mx-auto">{children}</div>
       </main>
     </div>
   );
 }
-
-
-
